@@ -1,0 +1,95 @@
+esphome:
+  name: arduino-stamplc
+  friendly_name: 'M5Stack STAMPLC Arduino'
+  min_version: 2024.6.0
+  on_boot:
+    - then:
+        rx8130.read_time:
+  platformio_options:
+    board_build.flash_mode: dio
+
+# Import external components...
+external_components:
+  - source: github://beormund/esphome-m5stamplc@main
+    components: [aw9523, lm75b, rx8130]
+
+esp32:
+  board: m5stack-stamps3
+  flash_size: 8MB
+  variant: ESP32S3
+  framework:
+    type: arduino
+
+# Disable safe mode for OTA
+safe_mode:
+  disabled: true
+
+# Allow Over-The-Air updates
+ota:
+  - platform: esphome
+
+#Enable logging
+logger:
+  level: VERY_VERBOSE
+  hardware_uart: USB_SERIAL_JTAG
+
+# Enable Home Assistant API
+api:
+
+wifi:
+  ssid: "The Harrison"
+  password: "theharrisons"
+  ap:
+    ssid: "arduino-stamplc-ap"
+
+# Time
+time:
+  - platform: rx8130
+    id: rx8130_time
+    update_interval: 30 min
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/London
+
+i2c:
+  sda: GPIO13
+  scl: GPIO15
+  scan: false
+
+spi:
+  clk_pin: GPIO7
+  mosi_pin: GPIO8
+  miso_pin: GPIO9
+
+# RS485 pin config (UART for Modbus)
+uart:
+  tx_pin:
+    number: GPIO0
+    ignore_strapping_warning: true
+  rx_pin: GPIO39
+  baud_rate: 9600
+  parity: EVEN
+
+# <--- Keep this section in this order --->
+
+# Set pin 3 high on boot for aw9523 and
+# pi4ioe5v6408 to initialise correctly. 
+power_supply:
+  - id: pin3_output_high
+    pin: 
+      number: 3
+      ignore_strapping_warning: true
+    enable_on_boot: true
+
+# Configuration of i2c GPIO Expander 1 
+# Note: pi4ioe5v6408 component missing from repo, but referenced in official README.
+# I'll leave it as a comment for now or assume it's part of the standard set if repo updated.
+# In the previous attempt it failed because of missing __init__.py. 
+# So I'll omit it until I find the source.
+
+# Configuration of i2c GPIO Expander 2
+aw9523:
+  - id: aw9523_1
+    address: 0x59
+
+# <--- End of ordered section --->

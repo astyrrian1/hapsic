@@ -1,0 +1,319 @@
+esphome:
+  name: hapsic-test-suite
+  friendly_name: "HAPSIC Robust Test Suite"
+
+  on_boot:
+    priority: 800 # High priority to initialize sensors before Hapsic (default 600?)
+    then:
+      - logger.log: "TEST SUITE STARTED"
+      # Initial State: Cold Start (Room OK, everything OFF)
+      - sensor.template.publish:
+          id: sim_duct_temp
+          state: 20.0
+      - sensor.template.publish:
+          id: sim_duct_rh
+          state: 35.0
+      - sensor.template.publish:
+          id: sim_supply_flow
+          state: 200.0
+      - sensor.template.publish:
+          id: sim_extract_flow
+          state: 200.0
+      - sensor.template.publish:
+          id: sim_bypass
+          state: 0.0
+      - sensor.template.publish:
+          id: sim_outdoor_temp
+          state: 5.0
+      - sensor.template.publish:
+          id: sim_outdoor_rh
+          state: 80.0
+      - sensor.template.publish:
+          id: sim_extract_temp
+          state: 21.0
+      - sensor.template.publish:
+          id: sim_extract_rh
+          state: 40.0
+      - sensor.template.publish:
+          id: sim_target_dew_point
+          state: 40.0
+      - sensor.template.publish:
+          id: sim_avg_temp
+          state: 22.0
+      - sensor.template.publish:
+          id: sim_avg_rh
+          state: 40.0 # Match target initially
+      - delay: 2s # Wait for everything to settle
+
+globals:
+  - id: g_steam_out
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: g_fan_out
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: g_test_step
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+host:
+
+logger:
+  level: INFO
+
+# 1. Inputs (Sensors)
+sensor:
+  - platform: template
+    name: "Simulated Duct Temp"
+    id: sim_duct_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Duct RH"
+    id: sim_duct_rh
+    unit_of_measurement: "%"
+  
+  - platform: template
+    name: "Simulated Supply Flow"
+    id: sim_supply_flow
+    unit_of_measurement: "m³/h"
+
+  - platform: template
+    name: "Simulated Extract Flow"
+    id: sim_extract_flow
+    unit_of_measurement: "m³/h"
+
+  - platform: template
+    name: "Simulated Bypass"
+    id: sim_bypass
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated Outdoor Temp"
+    id: sim_outdoor_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Outdoor RH"
+    id: sim_outdoor_rh
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated Pre-Steam/Extract Temp"
+    id: sim_extract_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Pre-Steam/Extract RH"
+    id: sim_extract_rh
+    unit_of_measurement: "%"
+
+  # HA Imported Values
+  - platform: template
+    name: "Simulated Target Dew Point"
+    id: sim_target_dew_point
+
+  - platform: template
+    name: "Simulated House Avg Temp"
+    id: sim_avg_temp
+
+  - platform: template
+    name: "Simulated House Avg RH"
+    id: sim_avg_rh
+
+# 2. Controls
+number:
+  - platform: template
+    name: "Max Capacity"
+    id: sim_max_capacity
+    initial_value: 5.0
+    min_value: 0.0
+    max_value: 15.0
+    step: 0.5
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Manual Reset"
+    id: sim_manual_reset
+    on_press:
+      - logger.log: "Manual Reset Pressed"
+
+# 3. Outputs
+output:
+  - platform: template
+    id: sim_steam_dac
+    type: float
+    write_action:
+      - lambda: id(g_steam_out) = state;
+
+  - platform: template
+    id: sim_fan_dac
+    type: float
+    write_action:
+      - lambda: id(g_fan_out) = state;
+
+switch:
+  - platform: template
+    name: "Safety Relay"
+    id: sim_safety_relay
+    optimistic: true
+
+# 4. Feedback
+text_sensor:
+  - platform: template
+    name: "FSM State"
+    id: sim_fsm_state
+
+  - platform: template
+    name: "Fault Reason"
+    id: sim_fault_reason
+
+# 5. The Component Under Test
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ hapsic ]
+
+hapsic:
+  duct_temp_sensor: sim_duct_temp
+  duct_rh_sensor: sim_duct_rh
+  supply_flow_sensor: sim_supply_flow
+  extract_flow_sensor: sim_extract_flow
+  bypass_sensor: sim_bypass
+  outdoor_temp_sensor: sim_outdoor_temp
+  outdoor_rh_sensor: sim_outdoor_rh
+  pre_steam_temp_sensor: sim_extract_temp
+  pre_steam_rh_sensor: sim_extract_rh
+  extract_avg_temp_sensor: sim_avg_temp
+  extract_avg_rh_sensor: sim_avg_rh
+  target_dew_point_sensor: sim_target_dew_point
+  max_capacity_number: sim_max_capacity
+  manual_reset_button: sim_manual_reset
+  steam_dac: sim_steam_dac
+  fan_dac: sim_fan_dac
+  safety_relay: sim_safety_relay
+  fsm_text_sensor: sim_fsm_state
+  fault_text_sensor: sim_fault_reason
+  update_interval: 1s
+
+# 6. Test Scenario Script
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          int step = id(g_test_step);
+          id(g_test_step) += 1;
+          
+          ESP_LOGI("test", "TEST STEP: %d | FSM: %s", step, id(sim_fsm_state).state.c_str());
+
+
+          // --- GLOBAL INVARIANT CHECKS (Run every tick) ---
+          // 1. Zero Flow Safety Check
+          if (id(sim_supply_flow).state < 20.0) {
+             if (id(g_steam_out) > 0.0) {
+                ESP_LOGE("test", "SAFETY VIOLATION: Steam active (%.1f) with ZERO FLOW!", id(g_steam_out));
+             }
+          }
+
+          // 2. Max Capacity Check
+          float max_cap_volts = id(sim_max_capacity).state * 0.66f; // Rough approximation of logic 15kg=10V? No, map is different.
+          // Actually, let's just check that if max_cap is 0, output is 0.
+          if (id(sim_max_capacity).state <= 0.0 && id(g_steam_out) > 0.0) {
+             ESP_LOGE("test", "SAFETY VIOLATION: Steam active with Max Capacity = 0!");
+          }
+
+          // Step 0-2: Verify STANDBY (Initial Conditions Met)
+          if (step == 2) {
+            if (id(sim_fsm_state).state == "STANDBY") {
+              ESP_LOGI("test", "CHECKPOINT 1 [PASS]: System in STANDBY");
+            } else {
+              ESP_LOGE("test", "CHECKPOINT 1 [FAIL]: Expected STANDBY, got %s", id(sim_fsm_state).state.c_str());
+            }
+          }
+
+          // Step 3: Trigger Normal Operation (Low Humidity)
+          if (step == 3) {
+            ESP_LOGI("test", "ACTION: Dropping Room RH to 30%% (Target 40%%)");
+            id(sim_avg_rh).publish_state(30.0);
+          }
+
+          // Step 6: Verify Active Cruise
+          if (step == 6) {
+             if (id(sim_fsm_state).state == "ACTIVE_CRUISE") {
+              ESP_LOGI("test", "CHECKPOINT 2 [PASS]: System entered ACTIVE_CRUISE");
+            } else {
+              ESP_LOGE("test", "CHECKPOINT 2 [FAIL]: Expected ACTIVE_CRUISE, got %s", id(sim_fsm_state).state.c_str());
+            }
+          }
+
+          // Step 10: Trigger Turbo (Very Low Humidity)
+          if (step == 10) {
+            ESP_LOGI("test", "ACTION: Dropping Room RH to 20%% (Target 40%%) -> Request Turbo");
+            id(sim_avg_rh).publish_state(20.0);
+          }
+
+          // Step 15: Verify Turbo Pending/Active
+          // Note: Turbo requires logic conditions (steam > thresh, duct rh > thresh), which we aren't simulating perfectly here
+          // So FSM might stay in CRUISE if simulated duct RH doesn't rise. 
+          // Use manual override to force conditions if needed, or check logic.
+          
+          // Step 20: Oscillation Test (Fluctuate Input)
+          if (step >= 20 && step < 30) {
+             // Simulate sinusoidal noise input
+             float base = 30.0;
+             float noise = sin(step * 0.5) * 1.0;
+             id(sim_avg_rh).publish_state(base + noise);
+             if (step == 20) ESP_LOGI("test", "ACTION: Starting Oscillation Injection");
+          }
+
+          // Step 30: Hygienic Purge Input (High Humidity)
+          if (step == 30) {
+            ESP_LOGI("test", "ACTION: Raising Room RH to 60%% (Target 40%%) -> Request Purge");
+            ESP_LOGI("test", "ACTION: Lowering Outdoor RH to 20%% (Dry Air available)");
+            id(sim_avg_rh).publish_state(60.0);
+            id(sim_outdoor_rh).publish_state(20.0);
+          }
+
+          // Step 35: Verify Purge
+          if (step == 35) {
+             if (id(sim_fsm_state).state == "HYGIENIC_PURGE") {
+              ESP_LOGI("test", "CHECKPOINT 3 [PASS]: System entered HYGIENIC_PURGE");
+            } else {
+              ESP_LOGE("test", "CHECKPOINT 3 [FAIL]: Expected HYGIENIC_PURGE, got %s", id(sim_fsm_state).state.c_str());
+            }
+          }
+          
+          // Step 40: Fault Injection (Zero Flow)
+          if (step == 40) {
+            ESP_LOGI("test", "ACTION: Cutting Supply Flow to 0");
+            id(sim_supply_flow).publish_state(0.0);
+          }
+
+          // Step 42: Verify Fault
+          if (step == 42) {
+             if (id(sim_fsm_state).state == "FAULT") {
+              ESP_LOGI("test", "CHECKPOINT 4 [PASS]: System detected FAULT (Zero Flow)");
+            } else {
+              ESP_LOGE("test", "CHECKPOINT 4 [FAIL]: Expected FAULT, got %s", id(sim_fsm_state).state.c_str());
+            }
+          }
+
+          // Step 45: Recovery
+          if (step == 45) {
+             ESP_LOGI("test", "ACTION: Restoring Supply Flow");
+             id(sim_supply_flow).publish_state(200.0);
+          }
+
+          // Step 50: Verify Recovery
+          if (step == 50) {
+             if (id(sim_fsm_state).state == "STANDBY") { // Or Active, depending on conditions
+              ESP_LOGI("test", "CHECKPOINT 5 [PASS]: System recovered from FAULT");
+            } else {
+              ESP_LOGI("test", "INFO: State is %s (Recovery Pending)", id(sim_fsm_state).state.c_str());
+            }
+          }

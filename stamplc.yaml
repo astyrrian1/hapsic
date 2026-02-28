@@ -1,0 +1,435 @@
+# =============================================================================
+# HAPSIC 2.2 Gold Master — StamPLC ESPHome Configuration
+# Target: M5Stack StamPLC (ESP32-S3) | ESPHome 2026.x | ESP-IDF Framework
+# =============================================================================
+
+substitutions:
+  # Zehnder filter settings for CAN sensor smoothing
+  filter_time: "5s"
+  filter_send_every: "1"
+  filter_window_size: "1"
+
+esphome:
+  name: stamplc-hapsic
+  friendly_name: "HAPSIC 2.2 PLC"
+  project:
+    name: "hapsic.gold_master"
+    version: "2.2.0"
+  platformio_options:
+    board_build.flash_mode: dio
+    lib_deps:
+      - m5stack/M5Unified
+      - m5stack/M5GFX
+    build_flags:
+      - -DARDUINO_M5STACK_STAMPLC
+      - -DARDUINO_USB_CDC_ON_BOOT=1
+      - -DARDUINO_USB_MSC_ON_BOOT=0
+      - -DARDUINO_USB_DFU_ON_BOOT=0
+
+esp32:
+  board: m5stack-stamps3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+# --- Network ---
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "HAPSIC-Fallback"
+    password: "hapsic2024"
+
+captive_portal:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+web_server:
+  port: 80
+
+logger:
+  level: VERY_VERBOSE
+  hardware_uart: USB_SERIAL_JTAG
+
+# =============================================================================
+# BUS TOPOLOGY
+# =============================================================================
+
+# Physical I2C Bus (StamPLC Port A)
+i2c:
+  sda: GPIO13
+  scl: GPIO15
+  scan: true
+  id: bus_a
+
+# PaHUB I2C Multiplexer — virtual I2C buses per channel
+tca9548a:
+  - id: pahub
+    i2c_id: bus_a
+    address: 0x70
+    channels:
+      - bus_id: pahub_ch0   # Steam DAC (MCP4725)
+        channel: 0
+      - bus_id: pahub_ch1   # Fan DAC (MCP4725)
+        channel: 1
+      - bus_id: pahub_ch2   # BAPI Voltmeter (ADS1115)
+        channel: 2
+
+# Import external components
+external_components:
+  - source: github://yoziru/esphome-zehnder-comfoair@main
+    components: [ zehnder_comfoair_q ]
+  - source: github://jenscski/esphome-components@main
+    components: [ aw9523 ]
+  - source:
+      type: local
+      path: components
+    components: [ hapsic ]
+
+# CAN Bus (StamPLC PWR-CAN, SIT1044QTK/3 transceiver)
+# NOTE: zehnder_comfoair_q auto-sets extended ID + 50kbps
+canbus:
+  - platform: esp32_can
+    tx_pin: GPIO42
+    rx_pin: GPIO43
+    bit_rate: 50kbps
+    can_id: 0
+    on_frame:
+      # --- Debug dump (all CAN frames) ---
+      - can_id: 0
+        can_id_mask: 0
+        use_extended_id: true
+        then:
+          - lambda: |-
+              auto data_pretty = remote_transmission_request ? "n/a" : format_hex_pretty(x).c_str();
+              if ((can_id & 0b11111000000000011111111000000) == 0b00000000000000000000001000000)
+              {
+                ESP_LOGD("comfoair_dump", "Node: %ld, PDO: %ld, content: %s", can_id & 0x3f, can_id >> 14, data_pretty);
+              }
+      # --- PDO dispatch (populate template sensors) ---
+      - can_id: 0b00000000000000000000001000000
+        can_id_mask: 0b11111000000000011111111000000
+        use_extended_id: true
+        remote_transmission_request: false
+        then:
+          - lambda: |-
+              auto pdo_id = id(comfoair)->get_pdo_id_from_can_id (can_id);
+              switch (pdo_id)
+              {
+                  comfoair_on_frame_case(119, id(comfoair), exhaust_fan_flow,     false);
+                  comfoair_on_frame_case(120, id(comfoair), supply_fan_flow,      false);
+                  comfoair_on_frame_case(227, id(comfoair), bypass_state,         true);
+                  comfoair_on_frame_case(274, id(comfoair), extract_air_temp,     false);
+                  comfoair_on_frame_case(276, id(comfoair), outdoor_air_temp,     false);
+                  comfoair_on_frame_case(278, id(comfoair), supply_air_temp,      false);
+                  comfoair_on_frame_case(290, id(comfoair), extract_air_humidity, true);
+                  comfoair_on_frame_case(292, id(comfoair), outdoor_air_humidity, true);
+              }
+
+# Zehnder ComfoAir Q component
+# request_ids: polls these PDOs from the Zehnder at request_interval
+# PDOs update on change, but request_ids ensures periodic refresh
+zehnder_comfoair_q:
+  id: comfoair
+  request_interval: 60s
+  request_ids:
+    - 119   # exhaust fan flow (m³/h)
+    - 120   # supply fan flow (m³/h)
+    - 227   # bypass state (%)
+    - 274   # extract air temp (°C × 10)
+    - 276   # outdoor air temp (°C × 10)
+    - 278   # supply air temp (°C × 10)
+    - 290   # extract air humidity (%)
+    - 292   # outdoor air humidity (%)
+
+# One-Wire Bus for DS18B20 (Port A Breakout G1)
+one_wire:
+  - platform: gpio
+    pin: GPIO1
+    id: onewire_bus
+
+# =============================================================================
+# HARDWARE INITIALIZATION (Strapping Pins)
+# =============================================================================
+power_supply:
+  - id: pin3_output_high
+    pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    enable_on_boot: true
+
+# I2C GPIO Expander for Relay Control (AW9523 @ 0x59)
+aw9523:
+  - id: gpio_expander
+    address: 0x59
+    i2c_id: bus_a
+
+# ADS1115 ADC for BAPI Voltmeter (on PaHUB Ch2)
+ads1115:
+  - address: 0x48
+    i2c_id: pahub_ch2
+    id: ads_bapi
+
+# =============================================================================
+# MQTT TELEMETRY
+# =============================================================================
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: hapsic
+
+# =============================================================================
+# OUTPUTS (Actuators)
+# =============================================================================
+
+output:
+  # Steam Valve DAC (PaHUB Ch0, MCP4725)
+  - platform: mcp4725
+    id: steam_dac
+    i2c_id: pahub_ch0
+
+  # Fan Override DAC (PaHUB Ch1, MCP4725)
+  - platform: mcp4725
+    id: fan_dac
+    i2c_id: pahub_ch1
+
+# Safety Relay via I2C GPIO Expander
+switch:
+  - platform: gpio
+    pin:
+      aw9523: gpio_expander
+      number: 0       # Verify exact pin for Relay 1 from StamPLC schematic
+      mode: output
+    name: "HAPSIC Safety Relay"
+    id: safety_relay
+    restore_mode: ALWAYS_OFF
+
+# =============================================================================
+# BINARY SENSOR — Required by zehnder_comfoair_q component header
+# (its template SFINAE checks for binary_sensor::BinarySensor)
+# =============================================================================
+
+binary_sensor:
+  - platform: template
+    id: comfoair_heating_season
+    name: "Heating Season"
+    internal: true
+
+  - platform: template
+    id: comfoair_cooling_season
+    name: "Cooling Season"
+    internal: true
+
+# =============================================================================
+# BUTTON — Manual Reset (auto-appears in HA as a button entity)
+# =============================================================================
+
+button:
+  - platform: template
+    name: "HAPSIC Manual Reset"
+    id: hapsic_manual_reset
+    icon: mdi:restart-alert
+    on_press:
+      then:
+        - logger.log: "Manual Reset pressed"
+
+  - platform: restart
+    name: "HAPSIC Reboot"
+
+# =============================================================================
+# NUMBER — Max Steam Capacity (auto-appears in HA, adjustable)
+# =============================================================================
+
+number:
+  - platform: template
+    name: "HAPSIC Max Capacity"
+    id: hapsic_max_capacity
+    icon: mdi:water-percent-alert
+    unit_of_measurement: "lbs/hr"
+    min_value: 0.5
+    max_value: 15.0
+    step: 0.5
+    initial_value: 5.0
+    restore_value: true
+    optimistic: true
+
+# =============================================================================
+# SENSORS
+# =============================================================================
+
+sensor:
+  # ===========================================================================
+  # LOCAL HARDWARE SENSORS
+  # ===========================================================================
+
+  # --- DS18B20 Duct Temperature ---
+  - platform: dallas_temp
+    one_wire_id: onewire_bus
+    name: "HAPSIC Duct Temp"
+    id: duct_temp_ds18b20
+    update_interval: 2s
+
+  # --- BAPI 0-10V Humidity (Voltmeter Unit on PaHUB Ch2, ADS1115) ---
+  - platform: ads1115
+    ads1115_id: ads_bapi
+    multiplexer: 'A0_GND'
+    gain: 6.144
+    name: "BAPI Raw Voltage"
+    id: bapi_volts
+    update_interval: 2s
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: duct_rh_scaled
+            state: !lambda 'return (x / 10.0) * 100.0;'
+
+  - platform: template
+    name: "HAPSIC Duct Humidity"
+    id: duct_rh_scaled
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+
+  # ===========================================================================
+  # ZEHNDER CAN TEMPLATE SENSORS (populated via on_frame PDO callbacks)
+  # ===========================================================================
+
+  - platform: template
+    id: supply_fan_flow    # PDO 120
+    name: "Zehnder Supply Flow"
+    icon: mdi:gauge
+    accuracy_decimals: 0
+    unit_of_measurement: "m³/h"
+    state_class: measurement
+
+  - platform: template
+    id: exhaust_fan_flow   # PDO 119
+    name: "Zehnder Exhaust Flow"
+    icon: mdi:gauge
+    accuracy_decimals: 0
+    unit_of_measurement: "m³/h"
+    state_class: measurement
+
+  - platform: template
+    id: bypass_state       # PDO 227
+    name: "Zehnder Bypass State"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    state_class: measurement
+
+  - platform: template
+    id: extract_air_temp   # PDO 274
+    name: "Zehnder Extract Air Temp"
+    filters: [multiply: 0.1]
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: outdoor_air_temp   # PDO 276
+    name: "Zehnder Outdoor Air Temp"
+    filters: [multiply: 0.1]
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: supply_air_temp    # PDO 278
+    name: "Zehnder Supply Air Temp"
+    filters: [multiply: 0.1]
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: extract_air_humidity  # PDO 290
+    name: "Zehnder Extract Air Humidity"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    device_class: humidity
+    state_class: measurement
+
+  - platform: template
+    id: outdoor_air_humidity  # PDO 292
+    name: "Zehnder Outdoor Air Humidity"
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+    device_class: humidity
+    state_class: measurement
+
+  # ===========================================================================
+  # HOME ASSISTANT PUSHED VALUES (via Native API — 3 values only)
+  # PLC caches last values and uses Zehnder extract as fallback
+  # ===========================================================================
+
+  - platform: homeassistant
+    name: "Target Dew Point"
+    entity_id: input_number.target_dew_point
+    id: target_dew_point_ha
+
+  - platform: homeassistant
+    name: "House Avg Temperature"
+    entity_id: sensor.house_average_temperature
+    id: room_avg_temp_ha
+
+  - platform: homeassistant
+    name: "House Avg Humidity"
+    entity_id: sensor.house_average_humidity
+    id: room_avg_rh_ha
+
+# =============================================================================
+# TEXT SENSORS — FSM State Published to HA
+# =============================================================================
+
+text_sensor:
+  - platform: template
+    name: "HAPSIC FSM State"
+    id: fsm_state_text
+    update_interval: 5s
+
+  - platform: template
+    name: "HAPSIC Fault Reason"
+    id: fault_reason_text
+    update_interval: 5s
+
+# =============================================================================
+# HAPSIC CONTROLLER — External Component (C++ Physics Engine)
+# =============================================================================
+
+hapsic:
+  duct_temp_sensor: duct_temp_ds18b20
+  duct_rh_sensor: duct_rh_scaled
+  supply_flow_sensor: supply_fan_flow
+  extract_flow_sensor: exhaust_fan_flow
+  bypass_sensor: bypass_state
+  outdoor_temp_sensor: outdoor_air_temp
+  outdoor_rh_sensor: outdoor_air_humidity
+  house_temp_sensor: room_avg_temp_ha
+  house_rh_sensor: room_avg_rh_ha
+  extract_can_temp_sensor: extract_air_temp
+  extract_can_rh_sensor: extract_air_humidity
+  extract_ha_temp_sensor: room_avg_temp_ha
+  extract_ha_rh_sensor: room_avg_rh_ha
+  supply_can_temp_sensor: supply_air_temp
+  supply_can_rh_sensor: extract_air_humidity
+  supply_ha_temp_sensor: room_avg_temp_ha
+  supply_ha_rh_sensor: room_avg_rh_ha
+  target_dew_point_sensor: target_dew_point_ha
+  max_capacity_number: hapsic_max_capacity
+  manual_reset_button: hapsic_manual_reset
+  steam_dac: steam_dac
+  fan_dac: fan_dac
+  safety_relay: safety_relay
+  fsm_text_sensor: fsm_state_text
+  fault_text_sensor: fault_reason_text

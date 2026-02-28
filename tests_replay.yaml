@@ -1,0 +1,202 @@
+esphome:
+  name: hapsic-replay
+  friendly_name: "HAPSIC Data Replay"
+
+  on_boot:
+    priority: 800
+    then:
+      - logger.log: "REPLAY SIMULATION STARTED"
+      - sensor.template.publish:
+          id: sim_target_dew_point
+          state: 8.0
+
+globals:
+  - id: g_steam_out
+    type: float
+    initial_value: '0.0'
+
+host:
+
+logger:
+  level: INFO
+
+# Define Components
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ hapsic, csv_player ]
+
+csv_player:
+  file: "simulation_data_sorted.csv"
+  speed: 10.0
+  # Map CSV Column (Entity ID) -> Simulation Sensor ID
+  sensor_mappings:
+    "sensor.hapsic_cleansed_inside_rh": sim_extract_rh
+    "sensor.hapsic_cleansed_inside_temp": csv_extract_temp
+    "sensor.hapsic_cleansed_supply_rh": sim_duct_rh
+    "sensor.hapsic_cleansed_supply_temp": csv_duct_temp
+    "sensor.hapsic_room_average_rh": sim_avg_rh
+    "sensor.hapsic_room_average_temp": csv_avg_temp
+    "sensor.hapsic_supply_flow": sim_supply_flow
+
+# 1. Inputs (Sensors)
+sensor:
+  # Intercept CSV Imperial values to translate them to SI natively before hitting engine
+  - platform: template
+    id: csv_extract_temp
+    on_value:
+      - sensor.template.publish:
+          id: sim_extract_temp
+          state: !lambda "return (x - 32.0) * 5.0 / 9.0;"
+          
+  - platform: template
+    id: csv_duct_temp
+    on_value:
+      - sensor.template.publish:
+          id: sim_duct_temp
+          state: !lambda "return (x - 32.0) * 5.0 / 9.0;"
+          
+  - platform: template
+    id: csv_avg_temp
+    on_value:
+      - sensor.template.publish:
+          id: sim_avg_temp
+          state: !lambda "return (x - 32.0) * 5.0 / 9.0;"
+
+  - platform: template
+    name: "Simulated Duct Temp"
+    id: sim_duct_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Duct RH"
+    id: sim_duct_rh
+    unit_of_measurement: "%"
+  
+  - platform: template
+    name: "Simulated Supply Flow"
+    id: sim_supply_flow
+    unit_of_measurement: "m³/h"
+
+  - platform: template
+    name: "Simulated Extract Flow"
+    id: sim_extract_flow
+    unit_of_measurement: "m³/h"
+
+  - platform: template
+    name: "Simulated Bypass"
+    id: sim_bypass
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated Outdoor Temp"
+    id: sim_outdoor_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Outdoor RH"
+    id: sim_outdoor_rh
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated Pre-Steam/Extract Temp"
+    id: sim_extract_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Pre-Steam/Extract RH"
+    id: sim_extract_rh
+    unit_of_measurement: "%"
+
+  # HA Imported Values
+  - platform: template
+    name: "Simulated Target Dew Point"
+    id: sim_target_dew_point
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated House Avg Temp"
+    id: sim_avg_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated House Avg RH"
+    id: sim_avg_rh
+    unit_of_measurement: "%"
+
+# 2. Controls
+number:
+  - platform: template
+    name: "Max Capacity"
+    id: sim_max_capacity
+    initial_value: 5.0
+    min_value: 0.0
+    max_value: 15.0
+    step: 0.5
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Manual Reset"
+    id: sim_manual_reset
+
+# 3. Outputs
+output:
+  - platform: template
+    id: sim_steam_dac
+    type: float
+    write_action:
+      - lambda: id(g_steam_out) = state;
+
+  - platform: template
+    id: sim_fan_dac
+    type: float
+    write_action:
+       - logger.log: 
+           format: "FAN OUTPUT: %.1f%%"
+           args: [ 'state * 100.0' ]
+
+switch:
+  - platform: template
+    name: "Safety Relay"
+    id: sim_safety_relay
+    optimistic: true
+
+# 4. Feedback
+text_sensor:
+  - platform: template
+    name: "FSM State"
+    id: sim_fsm_state
+
+  - platform: template
+    name: "Fault Reason"
+    id: sim_fault_reason
+
+hapsic:
+  duct_temp_sensor: sim_duct_temp
+  duct_rh_sensor: sim_duct_rh
+  supply_flow_sensor: sim_supply_flow
+  extract_flow_sensor: sim_extract_flow
+  bypass_sensor: sim_bypass
+  outdoor_temp_sensor: sim_outdoor_temp
+  outdoor_rh_sensor: sim_outdoor_rh
+  house_temp_sensor: sim_avg_temp
+  house_rh_sensor: sim_avg_rh
+  extract_can_temp_sensor: sim_extract_temp
+  extract_can_rh_sensor: sim_extract_rh
+  extract_ha_temp_sensor: sim_extract_temp
+  extract_ha_rh_sensor: sim_extract_rh
+  supply_can_temp_sensor: sim_extract_temp
+  supply_can_rh_sensor: sim_extract_rh
+  supply_ha_temp_sensor: sim_extract_temp
+  supply_ha_rh_sensor: sim_extract_rh
+  target_dew_point_sensor: sim_target_dew_point
+  max_capacity_number: sim_max_capacity
+  manual_reset_button: sim_manual_reset
+  steam_dac: sim_steam_dac
+  fan_dac: sim_fan_dac
+  safety_relay: sim_safety_relay
+  fsm_text_sensor: sim_fsm_state
+  fault_text_sensor: sim_fault_reason
+  update_interval: 1s

@@ -1,0 +1,27 @@
+esphome:
+  name: test-usb
+  friendly_name: test-usb
+  platformio_options:
+    board_build.flash_mode: dio
+    build_flags:
+      - -DARDUINO_USB_CDC_ON_BOOT=1
+      - -DARDUINO_USB_MSC_ON_BOOT=0
+      - -DARDUINO_USB_DFU_ON_BOOT=0
+
+esp32:
+  board: m5stack-stamps3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+logger:
+  level: VERY_VERBOSE
+
+wifi:
+  ssid: "The Harrison"
+  password: "theharrisons"
+  ap:
+    ssid: "test-usb-ap"
+
+captive_portal:

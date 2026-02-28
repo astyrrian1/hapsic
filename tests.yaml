@@ -1,0 +1,227 @@
+esphome:
+  name: hapsic-simulation
+  friendly_name: "HAPSIC Simulation"
+
+  on_boot:
+    then:
+      - sensor.template.publish:
+          id: sim_duct_temp
+          state: 20.0
+      - sensor.template.publish:
+          id: sim_duct_rh
+          state: 35.0
+      - sensor.template.publish:
+          id: sim_supply_flow
+          state: 200.0
+      - sensor.template.publish:
+          id: sim_extract_flow
+          state: 200.0
+      - sensor.template.publish:
+          id: sim_bypass
+          state: 0.0
+      - sensor.template.publish:
+          id: sim_outdoor_temp
+          state: 5.0
+      - sensor.template.publish:
+          id: sim_outdoor_rh
+          state: 80.0
+      - sensor.template.publish:
+          id: sim_extract_temp
+          state: 21.0
+      - sensor.template.publish:
+          id: sim_extract_rh
+          state: 40.0
+      - sensor.template.publish:
+          id: sim_target_dew_point
+          state: 10.0
+      - sensor.template.publish:
+          id: sim_avg_temp
+          state: 22.0
+      - sensor.template.publish:
+          id: sim_avg_rh
+          state: 30.0
+
+globals:
+  - id: g_steam_out
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+host:
+
+# Mock Logger
+logger:
+  level: DEBUG
+
+# Mock Components to satisfy Hapsic dependencies
+# ------------------------------------------------
+
+# 1. Inputs (Sensors) - Editable via API / Web Server if enabled, or just static/modulated here
+sensor:
+  - platform: template
+    name: "Simulated Duct Temp"
+    id: sim_duct_temp
+    unit_of_measurement: "°C"
+    on_value:
+      then:
+        - logger.log: "Simulated Duct Temp Updated"
+
+  - platform: template
+    name: "Simulated Duct RH"
+    id: sim_duct_rh
+    unit_of_measurement: "%"
+  
+  - platform: template
+    name: "Simulated Supply Flow"
+    id: sim_supply_flow
+    unit_of_measurement: "m³/h"
+
+  - platform: template
+    name: "Simulated Extract Flow"
+    id: sim_extract_flow
+    unit_of_measurement: "m³/h"
+
+  - platform: template
+    name: "Simulated Bypass"
+    id: sim_bypass
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated Outdoor Temp"
+    id: sim_outdoor_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Outdoor RH"
+    id: sim_outdoor_rh
+    unit_of_measurement: "%"
+
+  - platform: template
+    name: "Simulated Pre-Steam/Extract Temp"
+    id: sim_extract_temp
+    unit_of_measurement: "°C"
+
+  - platform: template
+    name: "Simulated Pre-Steam/Extract RH"
+    id: sim_extract_rh
+    unit_of_measurement: "%"
+
+  # HA Imported Values
+  - platform: template
+    name: "Simulated Target Dew Point"
+    id: sim_target_dew_point
+
+  - platform: template
+    name: "Simulated House Avg Temp"
+    id: sim_avg_temp
+
+  - platform: template
+    name: "Simulated House Avg RH"
+    id: sim_avg_rh
+
+# 2. Controls
+number:
+  - platform: template
+    name: "Max Capacity"
+    id: sim_max_capacity
+    initial_value: 5.0
+    min_value: 0.0
+    max_value: 15.0
+    step: 0.5
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Manual Reset"
+    id: sim_manual_reset
+    on_press:
+      - logger.log: "Manual Reset Pressed"
+
+# 3. Outputs
+output:
+  - platform: template
+    id: sim_steam_dac
+    type: float
+    write_action:
+      - lambda: id(g_steam_out) = state;
+      - logger.log: 
+          format: "STEAM OUTPUT: %.1f%%"
+          args: [ 'state * 100.0' ]
+
+  - platform: template
+    id: sim_fan_dac
+    type: float
+    write_action:
+      - logger.log: 
+          format: "FAN OUTPUT: %.1f%%"
+          args: [ 'state * 100.0' ]
+
+switch:
+  - platform: template
+    name: "Safety Relay"
+    id: sim_safety_relay
+    optimistic: true
+    turn_on_action:
+      - logger.log: "SAFETY RELAY ON"
+    turn_off_action:
+      - logger.log: "SAFETY RELAY OFF"
+
+# 4. Feedback
+text_sensor:
+  - platform: template
+    name: "FSM State"
+    id: sim_fsm_state
+
+  - platform: template
+    name: "Fault Reason"
+    id: sim_fault_reason
+
+# 5. The Component Under Test
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ hapsic ]
+
+hapsic:
+  duct_temp_sensor: sim_duct_temp
+  duct_rh_sensor: sim_duct_rh
+  supply_flow_sensor: sim_supply_flow
+  extract_flow_sensor: sim_extract_flow
+  bypass_sensor: sim_bypass
+  outdoor_temp_sensor: sim_outdoor_temp
+  outdoor_rh_sensor: sim_outdoor_rh
+  house_temp_sensor: sim_avg_temp
+  house_rh_sensor: sim_avg_rh
+  extract_can_temp_sensor: sim_extract_temp
+  extract_can_rh_sensor: sim_extract_rh
+  extract_ha_temp_sensor: sim_extract_temp
+  extract_ha_rh_sensor: sim_extract_rh
+  supply_can_temp_sensor: sim_extract_temp
+  supply_can_rh_sensor: sim_extract_rh
+  supply_ha_temp_sensor: sim_extract_temp
+  supply_ha_rh_sensor: sim_extract_rh
+  target_dew_point_sensor: sim_target_dew_point
+  max_capacity_number: sim_max_capacity
+  manual_reset_button: sim_manual_reset
+  steam_dac: sim_steam_dac
+  fan_dac: sim_fan_dac
+  safety_relay: sim_safety_relay
+  fsm_text_sensor: sim_fsm_state
+  fault_text_sensor: sim_fault_reason
+  update_interval: 1s # Fast updates for simulation
+
+# Simulation Logic
+interval:
+  - interval: 10s
+    then:
+      - logger.log: "--- SIMULATION TICK ---"
+      # Simulate humidity rising when steam is outputting (simple feedback loop)
+      - lambda: |-
+          if (id(g_steam_out) > 0.1) {
+            float current = id(sim_duct_rh).state;
+            id(sim_duct_rh).publish_state(current + 2.0);
+          } else {
+             float current = id(sim_duct_rh).state;
+             if (current > 30.0) id(sim_duct_rh).publish_state(current - 0.5);
+          }

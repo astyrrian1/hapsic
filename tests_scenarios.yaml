@@ -1,0 +1,164 @@
+esphome:
+  name: hapsic-scenarios
+
+  on_boot:
+    priority: 800
+    then:
+      - logger.log: "SCENARIO SIMULATION STARTED"
+      # SI defaults that we won't mutate much
+      - sensor.template.publish:
+          id: sim_target_dew_point
+          state: 10.0
+      - number.set:
+          id: sim_max_capacity
+          value: 2.27
+
+globals:
+  - id: g_steam_out
+    type: float
+    initial_value: '0.0'
+
+host:
+
+logger:
+  level: INFO
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ hapsic, csv_player ]
+
+csv_player:
+  file: "scenario_data.csv"
+  speed: 1000.0 # Run extremely fast
+  sensor_mappings:
+    "sim_extract_rh": sim_extract_rh
+    "sim_extract_temp": sim_extract_temp
+    "sim_duct_rh": sim_duct_rh
+    "sim_duct_temp": sim_duct_temp
+    "sim_avg_rh": sim_avg_rh
+    "sim_avg_temp": sim_avg_temp
+    "sim_supply_flow": sim_supply_flow
+
+sensor:
+  - platform: template
+    name: "sim_duct_temp"
+    id: sim_duct_temp
+    unit_of_measurement: "°C"
+  - platform: template
+    name: "sim_duct_rh"
+    id: sim_duct_rh
+    unit_of_measurement: "%"
+  - platform: template
+    name: "sim_supply_flow"
+    id: sim_supply_flow
+    unit_of_measurement: "m³/h"
+  - platform: template
+    name: "sim_extract_flow"
+    id: sim_extract_flow
+    unit_of_measurement: "m³/h"
+  - platform: template
+    name: "sim_bypass"
+    id: sim_bypass
+    unit_of_measurement: "%"
+  - platform: template
+    name: "sim_outdoor_temp"
+    id: sim_outdoor_temp
+    unit_of_measurement: "°C"
+    lambda: return 15.0;
+  - platform: template
+    name: "sim_outdoor_rh"
+    id: sim_outdoor_rh
+    unit_of_measurement: "%"
+    lambda: return 50.0;
+  - platform: template
+    name: "sim_extract_temp"
+    id: sim_extract_temp
+    unit_of_measurement: "°C"
+  - platform: template
+    name: "sim_extract_rh"
+    id: sim_extract_rh
+    unit_of_measurement: "%"
+  - platform: template
+    name: "sim_target_dew_point"
+    id: sim_target_dew_point
+    unit_of_measurement: "°C"
+  - platform: template
+    name: "sim_avg_temp"
+    id: sim_avg_temp
+    unit_of_measurement: "°C"
+  - platform: template
+    name: "sim_avg_rh"
+    id: sim_avg_rh
+    unit_of_measurement: "%"
+
+number:
+  - platform: template
+    name: "Max Capacity"
+    id: sim_max_capacity
+    initial_value: 2.27
+    min_value: 0.0
+    max_value: 15.0
+    step: 0.1
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Manual Reset"
+    id: sim_manual_reset
+
+output:
+  - platform: template
+    id: sim_steam_dac
+    type: float
+    write_action:
+      - lambda: id(g_steam_out) = state;
+
+  - platform: template
+    id: sim_fan_dac
+    type: float
+    write_action:
+      - lambda: return;
+
+switch:
+  - platform: template
+    name: "Safety Relay"
+    id: sim_safety_relay
+    optimistic: true
+
+text_sensor:
+  - platform: template
+    name: "FSM State"
+    id: sim_fsm_state
+  - platform: template
+    name: "Fault Reason"
+    id: sim_fault_reason
+
+hapsic:
+  duct_temp_sensor: sim_duct_temp
+  duct_rh_sensor: sim_duct_rh
+  supply_flow_sensor: sim_supply_flow
+  extract_flow_sensor: sim_extract_flow
+  bypass_sensor: sim_bypass
+  outdoor_temp_sensor: sim_outdoor_temp
+  outdoor_rh_sensor: sim_outdoor_rh
+  house_temp_sensor: sim_avg_temp
+  house_rh_sensor: sim_avg_rh
+  extract_can_temp_sensor: sim_extract_temp
+  extract_can_rh_sensor: sim_extract_rh
+  extract_ha_temp_sensor: sim_extract_temp
+  extract_ha_rh_sensor: sim_extract_rh
+  supply_can_temp_sensor: sim_extract_temp
+  supply_can_rh_sensor: sim_extract_rh
+  supply_ha_temp_sensor: sim_extract_temp
+  supply_ha_rh_sensor: sim_extract_rh
+  target_dew_point_sensor: sim_target_dew_point
+  max_capacity_number: sim_max_capacity
+  manual_reset_button: sim_manual_reset
+  steam_dac: sim_steam_dac
+  fan_dac: sim_fan_dac
+  safety_relay: sim_safety_relay
+  fsm_text_sensor: sim_fsm_state
+  fault_text_sensor: sim_fault_reason
+  update_interval: 1s

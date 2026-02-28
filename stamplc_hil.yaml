@@ -1,0 +1,336 @@
+esphome:
+  name: hapsic-hil
+  friendly_name: "HAPSIC Hardware-in-the-Loop Simulation"
+  platformio_options:
+    board_build.flash_mode: dio
+    lib_deps:
+      - m5stack/M5Unified
+      - m5stack/M5GFX
+    build_flags:
+      - -DARDUINO_M5STACK_STAMPLC
+      - -DARDUINO_USB_CDC_ON_BOOT=1
+      - -DARDUINO_USB_MSC_ON_BOOT=0
+      - -DARDUINO_USB_DFU_ON_BOOT=0
+
+esp32:
+  board: m5stack-stamps3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: arduino
+
+# --- Network ---
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "HAPSIC-Fallback"
+    password: "hapsic2024"
+
+captive_portal:
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+globals:
+  - id: g_steam_out
+    type: float
+    initial_value: '0.0'
+
+logger:
+  level: INFO
+  hardware_uart: USB_SERIAL_JTAG
+
+# Enable Native API for Home Assistant
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# =============================================================================
+# BUS TOPOLOGY
+# =============================================================================
+
+# Physical I2C Bus (StamPLC Port A)
+i2c:
+  sda: GPIO13
+  scl: GPIO15
+  scan: true
+  id: bus_a
+
+# PaHUB I2C Multiplexer — virtual I2C buses per channel
+tca9548a:
+  - id: pahub
+    i2c_id: bus_a
+    address: 0x70
+    channels:
+      - bus_id: pahub_ch0   # Steam DAC (MCP4725)
+        channel: 0
+      - bus_id: pahub_ch1   # Fan DAC (MCP4725)
+        channel: 1
+
+
+# 1. Inputs (Imported from Home Assistant)
+sensor:
+  # Duct / Supply
+  - platform: homeassistant
+    name: "Live Duct Temp"
+    id: live_duct_temp
+    entity_id: sensor.hapsic_cleansed_supply_temp
+    internal: false
+    on_value:
+      - lambda: |-
+          ESP_LOGI("debug", "RECEIVED Live Duct Temp: %.1f", x);
+    
+  - platform: homeassistant
+    name: "Live Duct RH"
+    id: live_duct_rh
+    entity_id: sensor.hapsic_cleansed_supply_rh
+
+  - platform: homeassistant
+    name: "Live Supply Flow"
+    id: live_supply_flow
+    entity_id: sensor.hapsic_supply_flow
+
+  # Pre-Steam / Extract 
+  - platform: homeassistant
+    name: "Live Pre-Steam Temp"
+    id: live_extract_temp
+    entity_id: sensor.hapsic_cleansed_inside_temp
+
+  - platform: homeassistant
+    name: "Live Pre-Steam RH"
+    id: live_extract_rh
+    entity_id: sensor.hapsic_cleansed_inside_rh
+
+  # Room Average
+  - platform: homeassistant
+    name: "Live Avg Temp"
+    id: live_avg_temp
+    entity_id: sensor.hapsic_room_average_temp
+
+  - platform: homeassistant
+    name: "Live Avg RH"
+    id: live_avg_rh
+    entity_id: sensor.hapsic_room_average_rh
+
+  # Outdoor
+  - platform: homeassistant
+    name: "Live Outdoor Temp"
+    id: live_outdoor_temp
+    entity_id: sensor.outdoor_temperature
+    internal: true 
+    on_value:
+      - sensor.template.publish:
+          id: safe_outdoor_temp
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "Live Outdoor RH"
+    id: live_outdoor_rh
+    entity_id: sensor.outdoor_humidity
+    internal: true
+    on_value:
+      - sensor.template.publish:
+          id: safe_outdoor_rh
+          state: !lambda 'return x;'
+          
+  # Safe inputs (Template sensors)
+  - platform: template
+    name: "Safe Outdoor Temp"
+    id: safe_outdoor_temp
+    unit_of_measurement: "°C"
+    lambda: return 15.0; # Default
+    
+  - platform: template
+    name: "Safe Outdoor RH"
+    id: safe_outdoor_rh
+    unit_of_measurement: "%"
+    lambda: return 60.0; # Default
+
+  # Bypass & Extract Flow (Derived)
+  - platform: template
+    name: "Live Bypass"
+    id: live_bypass
+    unit_of_measurement: "%"
+    lambda: return 0.0;
+    
+  - platform: template
+    name: "Live Extract Flow"
+    id: live_extract_flow
+    unit_of_measurement: "m³/h"
+    lambda: return id(live_supply_flow).state; # Assume balanced
+    update_interval: 5s
+
+  # Target Dew Point (Imported)
+  - platform: homeassistant
+    name: "Live Target Dew Point"
+    id: live_target_dew_point
+    entity_id: input_number.target_dew_point_2
+
+  # Production Reference (For Differential Analysis)
+  - platform: homeassistant
+    name: "Production Steam Output"
+    id: prod_steam_output
+    entity_id: sensor.hapsic_steam_valve_output
+    internal: true
+    on_value:
+      - component.update: feedback_steam_diff
+
+  # Differential Sensors
+  - platform: template
+    name: "Steam Output Diff"
+    id: feedback_steam_diff
+    unit_of_measurement: "%"
+    # Abs diff between Shadow (g_steam_out * 100) and Prod (state)
+    lambda: |-
+      float shadow = id(g_steam_out) * 100.0;
+      float prod = id(prod_steam_output).state;
+      if (isnan(prod)) return 0.0;
+      return abs(shadow - prod);
+    update_interval: never # Updated by on_value above
+
+  # Feedback (Output Monitoring)
+  - platform: template
+    name: "Shadow Steam Output"
+    id: feedback_steam
+    unit_of_measurement: "%"
+    lambda: return id(g_steam_out) * 100.0;
+    update_interval: 1s
+
+# 2. Controls
+number:
+  # Max Capacity - Local setting for this shadow instance
+  - platform: template
+    name: "Shadow Max Capacity"
+    id: shadow_max_capacity
+    min_value: 0.0
+    max_value: 15.0
+    step: 0.5
+    initial_value: 5.0
+    optimistic: true
+
+  # PID Tuning
+  - platform: template
+    name: "Shadow Kp A"
+    id: shadow_kp_a
+    min_value: 0.0
+    max_value: 10.0
+    step: 0.1
+    initial_value: 2.0
+    optimistic: true
+
+  - platform: template
+    name: "Shadow Ki A"
+    id: shadow_ki_a
+    min_value: 0.0
+    max_value: 1.0
+    step: 0.01
+    initial_value: 0.1
+    optimistic: true
+    
+  - platform: template
+    name: "Shadow Kp B"
+    id: shadow_kp_b
+    min_value: 0.0
+    max_value: 5.0
+    step: 0.1
+    initial_value: 0.5
+    optimistic: true
+
+  - platform: template
+    name: "Shadow Ki B"
+    id: shadow_ki_b
+    min_value: 0.0
+    max_value: 0.5
+    step: 0.001
+    initial_value: 0.05
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Shadow Manual Reset"
+    id: shadow_manual_reset
+
+switch:
+  - platform: template
+    name: "Shadow Safety Relay"
+    id: shadow_safety_relay
+    optimistic: true
+
+# 3. Outputs (Physical DACs to test HW voltage on bench)
+output:
+  # Steam Valve DAC (PaHUB Ch0, MCP4725)
+  - platform: mcp4725
+    id: shadow_steam_dac
+    i2c_id: pahub_ch0
+
+  # Fan Override DAC (PaHUB Ch1, MCP4725)
+  - platform: mcp4725
+    id: shadow_fan_dac
+    i2c_id: pahub_ch1
+
+# 4. Connect Hapsic
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ hapsic ]
+
+hapsic:
+  duct_temp_sensor: live_duct_temp
+  duct_rh_sensor: live_duct_rh
+  supply_flow_sensor: live_supply_flow
+  extract_flow_sensor: live_extract_flow
+  bypass_sensor: live_bypass
+  outdoor_temp_sensor: safe_outdoor_temp
+  outdoor_rh_sensor: safe_outdoor_rh
+  house_temp_sensor: live_avg_temp
+  house_rh_sensor: live_avg_rh
+  extract_can_temp_sensor: live_extract_temp
+  extract_can_rh_sensor: live_extract_rh
+  extract_ha_temp_sensor: live_extract_temp
+  extract_ha_rh_sensor: live_extract_rh
+  supply_can_temp_sensor: live_extract_temp
+  supply_can_rh_sensor: live_extract_rh
+  supply_ha_temp_sensor: live_extract_temp
+  supply_ha_rh_sensor: live_extract_rh
+  target_dew_point_sensor: live_target_dew_point
+  max_capacity_number: shadow_max_capacity
+  kp_a_number: shadow_kp_a
+  ki_a_number: shadow_ki_a
+  kp_b_number: shadow_kp_b
+  ki_b_number: shadow_ki_b
+  manual_reset_button: shadow_manual_reset
+  steam_dac: shadow_steam_dac
+  fan_dac: shadow_fan_dac
+  safety_relay: shadow_safety_relay
+  fsm_text_sensor: shadow_fsm_state
+  fault_text_sensor: shadow_fault_reason
+  update_interval: 1s
+
+text_sensor:
+  - platform: template
+    name: "Shadow FSM State"
+    id: shadow_fsm_state
+  
+  - platform: template
+    name: "Shadow Fault Reason"
+    id: shadow_fault_reason
+
+  # Production Reference
+  - platform: homeassistant
+    name: "Production FSM State"
+    id: prod_fsm_state
+    entity_id: sensor.hapsic_fsm_state
+
+  - platform: template
+    name: "FSM State Match"
+    id: fsm_state_match
+    lambda: |-
+      if (id(shadow_fsm_state).state == id(prod_fsm_state).state) {
+        return {"MATCH"};
+      } else {
+        return {"DIFF"};
+      }
+    update_interval: 1s

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# ESPHome
+.esphome/
+*.bin
+*.elf
+
+# Logs and Data
+logs.txt
+cpp_scenarios.txt
+cpp_sim_output.txt
+python_scenarios.txt
+python_sim_output.txt
+replay_sim_output.txt
+cpp_sim_final.txt
+proof_cpp.txt
+proof_cpp_raw.txt
+proof_python.txt
+
+# Editor
+.vscode/
+.clangd/
+compile_commands.json
+
+# Ignore generated test data explicitly
+scenario_data.csv
+
+# Ignore secrets safely
+secrets.yaml
