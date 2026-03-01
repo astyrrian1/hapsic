@@ -10,6 +10,7 @@
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
 #endif
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/output/float_output.h"
 #include "esphome/components/sensor/sensor.h"
@@ -129,10 +130,8 @@ void HapsicController::setup() {
     steam_dac_->set_level(0.0f);
   if (fan_dac_)
     fan_dac_->set_level(0.0f);
-  if (safety_relay_)
-    safety_relay_->turn_off();
 
-  fsm_state_ = STANDBY;
+  fsm_state_ = INITIALIZING;
   fault_reason_ = "NONE";
   steam_voltage_ = 0.0f;
   fan_voltage_ = 0.0f;
@@ -177,8 +176,38 @@ void HapsicController::setup() {
   M5StamPLC.Display.fillRect(0, 0, M5StamPLC.Display.width(),
                              M5StamPLC.Display.height());
 #endif
+#ifdef DESK_MODE
+  // Shadow Integrator: Subscribe to production MQTT for voltage tracking
+#ifdef USE_MQTT
+  if (mqtt::global_mqtt_client != nullptr) {
+    mqtt::global_mqtt_client->subscribe(
+        "hapsic/telemetry/state",
+        [this](const std::string &topic, const std::string &payload) {
+          // Parse io.steam_volts from production JSON
+          // Simple extraction without full JSON parser
+          auto pos = payload.find("\"steam_volts\":");
+          if (pos == std::string::npos)
+            pos = payload.find("\"volts_out\":");
+          if (pos != std::string::npos) {
+            auto colon = payload.find(':', pos);
+            if (colon != std::string::npos) {
+              float v = atof(payload.c_str() + colon + 1);
+              if (v >= 0.0f && v <= 10.0f) {
+                shadow_prod_voltage_ = v;
+                shadow_mode_active_ = true;
+                shadow_last_update_ms_ = millis();
+              }
+            }
+          }
+        },
+        0);
+    ESP_LOGI("hapsic", "SHADOW MODE: Subscribed to hapsic/telemetry/state for "
+                       "production voltage tracking");
+  }
+#endif
+#endif
 
-  ESP_LOGI("hapsic", "Boot complete. State=STANDBY, Steam=0V, Relay=OPEN");
+  ESP_LOGI("hapsic", "Boot complete. State=INITIALIZING, Steam=0V, Relay=OPEN");
 }
 
 // =============================================================================
@@ -193,6 +222,8 @@ void HapsicController::update() {
   // Run the super-fast UI updates
   update_buttons();
   update_display();
+
+  ESP_LOGI("hapsic", "HAPSIC Heartbeat - State: %s", state_name(fsm_state_));
 
   uint32_t now = esp_timer_get_time() / 1000;
   dt_ = (now - last_tick_ms_) / 1000.0f;
@@ -236,7 +267,9 @@ void HapsicController::update() {
 
   bool sensors_ok = read_sensors();
   if (!sensors_ok) {
-    trigger_fault("Sensor Failure");
+    if (fsm_state_ != INITIALIZING) {
+      trigger_fault("Sensor Failure");
+    }
     write_output();
     publish_telemetry();
     return;
@@ -284,6 +317,8 @@ float HapsicController::sensor_value(sensor::Sensor *s) {
 
 const char *HapsicController::state_name(State s) {
   switch (s) {
+  case INITIALIZING:
+    return "INITIALIZING";
   case STANDBY:
     return "STANDBY";
   case ACTIVE_CRUISE:
@@ -345,9 +380,16 @@ bool HapsicController::read_sensors() {
   if (!std::isnan(raw_extract))
     extract_flow_ = raw_extract;
 
+  // --- Bypass state ---
   float raw_bypass = sensor_value(bypass_sensor_);
-  if (!std::isnan(raw_bypass))
+  float raw_ha_bypass = sensor_value(bypass_ha_sensor_);
+  if (std::isnan(raw_bypass) && !std::isnan(raw_ha_bypass)) {
+    raw_bypass = raw_ha_bypass;
+  }
+
+  if (!std::isnan(raw_bypass)) {
     bypass_pct_ = raw_bypass;
+  }
 
   // --- Inside Conditions (Primary: House HA, Fallback 1: Extract CAN, Fallback
   // 2: Extract HA, Fallback 3: Cache) ---
@@ -393,7 +435,7 @@ bool HapsicController::read_sensors() {
         last_valid_room_dp_time_ > 0) {
       ESP_LOGW(
           "hapsic",
-          "All Inside sensors NaN! Using cached DP (%.1fC). Expires in %lu s",
+          "All Inside sensors NaN! Using cached DP (%.1fC). Expires in %u s",
           room_dp_, 1800 - ((now_ms - last_valid_room_dp_time_) / 1000));
       using_fallback_ = true;
     } else {
@@ -432,12 +474,14 @@ bool HapsicController::read_sensors() {
       supply_rh_ = effective_supply_rh;
       last_valid_supply_w_time_ = now_ms;
     }
-  } else {
+  }
+
+  if (std::isnan(effective_supply_temp) || std::isnan(effective_supply_rh)) {
     if (now_ms - last_valid_supply_w_time_ < 1800000 &&
         last_valid_supply_w_time_ > 0) {
       ESP_LOGW("hapsic",
                "All Supply sensors NaN! Using cached Supply W (%.1fg/kg). "
-               "Expires in %lu s",
+               "Expires in %u s",
                supply_w_, 1800 - ((now_ms - last_valid_supply_w_time_) / 1000));
     } else {
       ESP_LOGE("hapsic",
@@ -470,12 +514,10 @@ bool HapsicController::read_sensors() {
 
   target_room_dp_ = cached_target_dp_;
 
-  // --- Max capacity (from number component) ---
-  if (max_capacity_number_) {
-    float mc = max_capacity_number_->state;
-    if (!std::isnan(mc) && mc > 0.1f) {
-      max_capacity_ = mc;
-    }
+  // --- Max capacity (from HA sensor) ---
+  float mc = sensor_value(max_capacity_sensor_);
+  if (!std::isnan(mc) && mc > 0.1f) {
+    max_capacity_ = mc;
   }
 
   // --- Mass Balance & Feasibility Horizon ---
@@ -512,6 +554,10 @@ bool HapsicController::read_sensors() {
 // =============================================================================
 
 bool HapsicController::execute_interlocks() {
+  if (fsm_state_ == INITIALIZING) {
+    return false; // Skip interlocks until we have valid sensors
+  }
+
   if (fsm_state_ == MAINTENANCE_LOCKOUT) {
     if (manual_reset_requested_) {
       ESP_LOGI("hapsic", "Manual reset — exiting MAINTENANCE_LOCKOUT");
@@ -595,6 +641,25 @@ void HapsicController::evaluate_fsm() {
   float room_deficit = target_room_dp_ - room_dp_;
 
   switch (fsm_state_) {
+  case INITIALIZING:
+    steam_voltage_ = 0.0f;
+    fan_voltage_ = 0.0f;
+    if (!std::isnan(duct_temp_) && !std::isnan(duct_rh_) &&
+        !std::isnan(room_dp_)) {
+      ESP_LOGI("hapsic",
+               "INITIALIZING → STANDBY (All critical sensors available)");
+      fsm_state_ = STANDBY;
+    } else {
+      // Periodic log to show what we are waiting on
+      if (tick_counter_ % 6 == 0) {
+        ESP_LOGI("hapsic",
+                 "INITIALIZING... waiting for sensors (Duct Temp: %.1f, Duct "
+                 "RH: %.1f, Room DP: %.1f)",
+                 duct_temp_, duct_rh_, room_dp_);
+      }
+    }
+    break;
+
   case STANDBY:
     steam_voltage_ = 0.0f;
     fan_voltage_ = 0.0f;
@@ -770,10 +835,15 @@ void HapsicController::execute_loop_b() {
   // Feed-Forward
   float target_w = MagnusTetens::target_w_from_dp(target_duct_dp_, P_ATM);
   float w_req = std::max(0.0f, target_w - supply_w_);
-  float cfm = supply_flow_ * 0.5886f;
-  float lbs_hr_req = (w_req * cfm * 60.0f * RHO) / 7000.0f;
-  float kg_hr_req = lbs_hr_req * 0.453592f;
-  v_ff_ = (kg_hr_req / max_capacity_) * 10.0f;
+  float air_mass_kg_h = supply_flow_ * RHO;
+  float grams_water_h = w_req * air_mass_kg_h;
+  float kg_water_h = grams_water_h / 1000.0f;
+
+  if (max_capacity_ > 0.1f) {
+    v_ff_ = std::min(9.5f, (kg_water_h / max_capacity_) * 10.0f);
+  } else {
+    v_ff_ = 0.0f;
+  }
 
   // Error & Deadband
   float error = target_duct_dp_ - duct_dp_;
@@ -782,17 +852,35 @@ void HapsicController::execute_loop_b() {
 
   // 2. Continuous Ideal PID
   float p_term = KP_B * error;
-  ideal_voltage_ = std::min(10.0f, v_ff_) + p_term + (KI_B * integrator_b_);
+  ideal_voltage_ = std::min(9.5f, v_ff_ + p_term + (KI_B * integrator_b_));
+
+#ifdef DESK_MODE
+  // Shadow Integrator (Mode C): Override integrator to track production
+  uint32_t now_ms = millis();
+  if (shadow_mode_active_ && shadow_prod_voltage_ >= 0.0f &&
+      (now_ms - shadow_last_update_ms_) < 30000) {
+    // Back-compute integrator so ideal_voltage matches production output
+    if (KI_B > 0.001f) {
+      integrator_b_ = (shadow_prod_voltage_ - v_ff_ - p_term) / KI_B;
+    }
+    ideal_voltage_ = std::min(9.5f, v_ff_ + p_term + (KI_B * integrator_b_));
+    ESP_LOGD("hapsic", "SHADOW: prod=%.1fV → integ=%.1f ideal=%.1fV",
+             shadow_prod_voltage_, integrator_b_, ideal_voltage_);
+  }
+#endif
+
   float quantized_target = roundf(ideal_voltage_ * 2.0f) / 2.0f;
 
   float next_voltage = 0.0f;
   active_limit_ = "NONE";
 
   // 3. Phase 1 (Cold Start Strike)
-  if (!boil_achieved_ && steam_voltage_ == 0.0f && quantized_target >= 2.5f) {
+  if (!boil_achieved_ && steam_voltage_ == 0.0f && quantized_target >= 3.5f) {
     next_voltage = 9.5f;
     stasis_active_ = true;
     stasis_timer_sec_ = 180;
+    upward_rate_ticks_ = 0;
+    downward_rate_ticks_ = 0;
   }
   // 4. Phase 2 (Dynamic Shatter)
   else if (stasis_active_) {
@@ -813,17 +901,17 @@ void HapsicController::execute_loop_b() {
   }
   // 5. Phase 3 (Glide-Path Modulation)
   else {
-    if (steam_voltage_ == 0.0f && quantized_target >= 2.5f) {
-      next_voltage = 2.5f; // Min-Fire Bypass
+    if (steam_voltage_ == 0.0f && quantized_target >= 3.5f) {
+      next_voltage = 3.5f; // Min-Fire Bypass
     } else {
       next_voltage = ideal_voltage_;
     }
   }
 
   // Safety Ceiling & Limits
-  ceiling_volts_ = 10.0f - ((duct_rh_ - 82.0f) * 1.6f);
-  if (ceiling_volts_ > 10.0f)
-    ceiling_volts_ = 10.0f;
+  ceiling_volts_ = 9.5f - ((duct_rh_ - 82.0f) * 1.6f);
+  if (ceiling_volts_ > 9.5f)
+    ceiling_volts_ = 9.5f;
   if (ceiling_volts_ < 0.0f)
     ceiling_volts_ = 0.0f;
 
@@ -837,19 +925,38 @@ void HapsicController::execute_loop_b() {
       next_voltage = 0.0f;
       active_limit_ = "MIN_FIRE_DEADZONE";
     }
-    if (next_voltage > 10.0f) {
-      next_voltage = 10.0f;
+    if (next_voltage > 9.5f) {
+      next_voltage = 9.5f;
       active_limit_ = "MAX_HW_CLAMP";
     }
 
-    // Up/Down Slew (Max +0.5V per 60s -> 0.0416V per 5s) (Max -0.5V per 30s ->
-    // 0.0833V per 5s)
-    if (next_voltage > steam_voltage_ + 0.0416f) {
-      next_voltage = steam_voltage_ + 0.0416f;
-      active_limit_ = "UP_SLEW";
-    } else if (next_voltage < steam_voltage_ - 0.0833f) {
-      next_voltage = steam_voltage_ - 0.0833f;
-      active_limit_ = "DOWN_SLEW";
+    // Asymmetric Slew Limits (tick-counter approach matching Python)
+    // +0.5V per 60s (12 ticks), -0.5V per 30s (6 ticks)
+    if (quantized_target > steam_voltage_) {
+      downward_rate_ticks_ = 0;
+      upward_rate_ticks_++;
+      if (upward_rate_ticks_ >= 12) {
+        next_voltage = steam_voltage_ + 0.5f;
+        upward_rate_ticks_ = 0;
+        active_limit_ = "UP_SLEW";
+      } else {
+        next_voltage = steam_voltage_;
+        active_limit_ = "UP_SLEW";
+      }
+    } else if (quantized_target < steam_voltage_) {
+      upward_rate_ticks_ = 0;
+      downward_rate_ticks_++;
+      if (downward_rate_ticks_ >= 6) {
+        next_voltage = steam_voltage_ - 0.5f;
+        downward_rate_ticks_ = 0;
+        active_limit_ = "DOWN_SLEW";
+      } else {
+        next_voltage = steam_voltage_;
+        active_limit_ = "DOWN_SLEW";
+      }
+    } else {
+      upward_rate_ticks_ = 0;
+      downward_rate_ticks_ = 0;
     }
   }
 
@@ -884,14 +991,6 @@ void HapsicController::write_output() {
 
   if (fan_dac_) {
     fan_dac_->set_level(fan_voltage_ / 10.0f);
-  }
-
-  if (safety_relay_) {
-    if (steam_voltage_ == 0.0f) {
-      safety_relay_->turn_off();
-    } else {
-      safety_relay_->turn_on();
-    }
   }
 }
 
@@ -975,6 +1074,70 @@ void HapsicController::publish_telemetry() {
   float loop_b_p_term = KP_B * loop_b_error;
   float loop_b_i_term = KI_B * integrator_b_;
 
+  // ESP32 API Opt-In Telemetry
+  if (tel_feasibility_max_achievable_dp_)
+    tel_feasibility_max_achievable_dp_->publish_state(max_achievable_dp_);
+  if (tel_feasibility_total_loss_cfm_)
+    tel_feasibility_total_loss_cfm_->publish_state(total_loss_cfm_);
+  if (tel_loop_a_pv_room_dp_)
+    tel_loop_a_pv_room_dp_->publish_state(room_dp_);
+  if (tel_loop_a_error_)
+    tel_loop_a_error_->publish_state(loop_a_error);
+  if (tel_loop_a_p_term_)
+    tel_loop_a_p_term_->publish_state(loop_a_p_term);
+  if (tel_loop_a_i_term_)
+    tel_loop_a_i_term_->publish_state(loop_a_i_term);
+  if (tel_loop_a_integrator_)
+    tel_loop_a_integrator_->publish_state(integrator_a_);
+  if (tel_loop_a_output_target_)
+    tel_loop_a_output_target_->publish_state(target_duct_dp_);
+  if (tel_loop_b_pv_duct_dp_)
+    tel_loop_b_pv_duct_dp_->publish_state(duct_dp_);
+  if (tel_loop_b_error_)
+    tel_loop_b_error_->publish_state(loop_b_error);
+  if (tel_loop_b_v_ff_)
+    tel_loop_b_v_ff_->publish_state(v_ff_);
+  if (tel_loop_b_p_term_)
+    tel_loop_b_p_term_->publish_state(loop_b_p_term);
+  if (tel_loop_b_i_term_)
+    tel_loop_b_i_term_->publish_state(loop_b_i_term);
+  if (tel_loop_b_integrator_)
+    tel_loop_b_integrator_->publish_state(integrator_b_);
+  if (tel_loop_b_ideal_voltage_)
+    tel_loop_b_ideal_voltage_->publish_state(ideal_voltage_);
+  if (tel_batch_stasis_timer_sec_)
+    tel_batch_stasis_timer_sec_->publish_state(stasis_timer_sec_);
+  if (tel_batch_zero_volt_ticks_)
+    tel_batch_zero_volt_ticks_->publish_state(zero_volt_ticks_);
+  if (tel_limiters_ceiling_volts_)
+    tel_limiters_ceiling_volts_->publish_state(ceiling_volts_);
+  if (tel_physics_duct_derivative_)
+    tel_physics_duct_derivative_->publish_state(duct_derivative_);
+  if (tel_physics_structure_velocity_)
+    tel_physics_structure_velocity_->publish_state(structure_velocity_);
+  if (tel_psychro_pre_steam_dp_)
+    tel_psychro_pre_steam_dp_->publish_state(supply_dp_);
+  if (tel_psychro_outdoor_dp_)
+    tel_psychro_outdoor_dp_->publish_state(outdoor_dp_);
+  if (tel_psychro_duct_rh_ema_)
+    tel_psychro_duct_rh_ema_->publish_state(duct_rh_);
+  if (tel_io_volts_out_)
+    tel_io_volts_out_->publish_state(steam_voltage_);
+  if (tel_io_steam_mass_lbs_)
+    tel_io_steam_mass_lbs_->publish_state(steam_mass_kg_hr_ * 2.20462f);
+  if (tel_health_chi_ema_)
+    tel_health_chi_ema_->publish_state(chi_ema_);
+
+  if (tel_feasibility_is_infeasible_)
+    tel_feasibility_is_infeasible_->publish_state(is_target_infeasible_);
+  if (tel_batch_boil_achieved_)
+    tel_batch_boil_achieved_->publish_state(boil_achieved_);
+  if (tel_batch_stasis_active_)
+    tel_batch_stasis_active_->publish_state(stasis_active_);
+
+  if (tel_limiters_active_limit_)
+    tel_limiters_active_limit_->publish_state(active_limit_);
+
   char json[2048];
   snprintf(json, sizeof(json),
            "{"
@@ -1010,7 +1173,11 @@ void HapsicController::publish_telemetry() {
 
 #ifdef USE_MQTT
   if (mqtt::global_mqtt_client != nullptr) {
+#ifdef DESK_MODE
+    mqtt::global_mqtt_client->publish("hapsic-desk/telemetry/state", json);
+#else
     mqtt::global_mqtt_client->publish("hapsic/telemetry/state", json);
+#endif
   }
 #endif
 

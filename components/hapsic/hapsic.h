@@ -27,6 +27,10 @@ namespace sensor {
 class Sensor;
 }
 
+namespace binary_sensor {
+class BinarySensor;
+}
+
 namespace text_sensor {
 class TextSensor;
 }
@@ -100,6 +104,7 @@ public:
   // FSM STATES
   // =========================================================================
   enum State {
+    INITIALIZING,
     STANDBY,
     ACTIVE_CRUISE,
     TURBO_PENDING,
@@ -117,8 +122,15 @@ public:
   void set_duct_temp_sensor(sensor::Sensor *s) { duct_temp_sensor_ = s; }
   void set_duct_rh_sensor(sensor::Sensor *s) { duct_rh_sensor_ = s; }
   void set_supply_flow_sensor(sensor::Sensor *s) { supply_flow_sensor_ = s; }
+  void set_supply_flow_sensor_ha(sensor::Sensor *s) {
+    supply_ha_flow_sensor_ = s;
+  }
   void set_extract_flow_sensor(sensor::Sensor *s) { extract_flow_sensor_ = s; }
+  void set_extract_flow_sensor_ha(sensor::Sensor *s) {
+    extract_ha_flow_sensor_ = s;
+  }
   void set_bypass_sensor(sensor::Sensor *s) { bypass_sensor_ = s; }
+  void set_bypass_sensor_ha(sensor::Sensor *s) { bypass_ha_sensor_ = s; }
 
   // Outdoor
   void set_outdoor_sensors(sensor::Sensor *t, sensor::Sensor *rh) {
@@ -165,8 +177,8 @@ public:
     target_dew_point_sensor = s;
   }
 
-  // Max capacity (ESPHome number component)
-  void set_max_capacity_number(number::Number *n) { max_capacity_number_ = n; }
+  // Max capacity (ESPHome sensor component)
+  void set_max_capacity_sensor(sensor::Sensor *s) { max_capacity_sensor_ = s; }
 
   // Manual reset (ESPHome button component)
   void set_manual_reset_button(button::Button *b) { manual_reset_button_ = b; }
@@ -180,11 +192,88 @@ public:
   // Outputs
   void set_steam_dac(output::FloatOutput *o) { steam_dac_ = o; }
   void set_fan_dac(output::FloatOutput *o) { fan_dac_ = o; }
-  void set_safety_relay(switch_::Switch *s) { safety_relay_ = s; }
 
   // Text sensors for HA visibility
   void set_fsm_text(text_sensor::TextSensor *s) { fsm_text_ = s; }
   void set_fault_text(text_sensor::TextSensor *s) { fault_text_ = s; }
+
+  // =========================================================================
+  // Opt-in Telemetry Sensors
+  // =========================================================================
+  void set_tel_feasibility_max_achievable_dp(sensor::Sensor *s) {
+    tel_feasibility_max_achievable_dp_ = s;
+  }
+  void set_tel_feasibility_total_loss_cfm(sensor::Sensor *s) {
+    tel_feasibility_total_loss_cfm_ = s;
+  }
+  void set_tel_loop_a_pv_room_dp(sensor::Sensor *s) {
+    tel_loop_a_pv_room_dp_ = s;
+  }
+  void set_tel_loop_a_error(sensor::Sensor *s) { tel_loop_a_error_ = s; }
+  void set_tel_loop_a_p_term(sensor::Sensor *s) { tel_loop_a_p_term_ = s; }
+  void set_tel_loop_a_i_term(sensor::Sensor *s) { tel_loop_a_i_term_ = s; }
+  void set_tel_loop_a_integrator(sensor::Sensor *s) {
+    tel_loop_a_integrator_ = s;
+  }
+  void set_tel_loop_a_output_target(sensor::Sensor *s) {
+    tel_loop_a_output_target_ = s;
+  }
+  void set_tel_loop_b_pv_duct_dp(sensor::Sensor *s) {
+    tel_loop_b_pv_duct_dp_ = s;
+  }
+  void set_tel_loop_b_error(sensor::Sensor *s) { tel_loop_b_error_ = s; }
+  void set_tel_loop_b_v_ff(sensor::Sensor *s) { tel_loop_b_v_ff_ = s; }
+  void set_tel_loop_b_p_term(sensor::Sensor *s) { tel_loop_b_p_term_ = s; }
+  void set_tel_loop_b_i_term(sensor::Sensor *s) { tel_loop_b_i_term_ = s; }
+  void set_tel_loop_b_integrator(sensor::Sensor *s) {
+    tel_loop_b_integrator_ = s;
+  }
+  void set_tel_loop_b_ideal_voltage(sensor::Sensor *s) {
+    tel_loop_b_ideal_voltage_ = s;
+  }
+  void set_tel_batch_stasis_timer_sec(sensor::Sensor *s) {
+    tel_batch_stasis_timer_sec_ = s;
+  }
+  void set_tel_batch_zero_volt_ticks(sensor::Sensor *s) {
+    tel_batch_zero_volt_ticks_ = s;
+  }
+  void set_tel_limiters_ceiling_volts(sensor::Sensor *s) {
+    tel_limiters_ceiling_volts_ = s;
+  }
+  void set_tel_physics_duct_derivative(sensor::Sensor *s) {
+    tel_physics_duct_derivative_ = s;
+  }
+  void set_tel_physics_structure_velocity(sensor::Sensor *s) {
+    tel_physics_structure_velocity_ = s;
+  }
+  void set_tel_psychro_pre_steam_dp(sensor::Sensor *s) {
+    tel_psychro_pre_steam_dp_ = s;
+  }
+  void set_tel_psychro_outdoor_dp(sensor::Sensor *s) {
+    tel_psychro_outdoor_dp_ = s;
+  }
+  void set_tel_psychro_duct_rh_ema(sensor::Sensor *s) {
+    tel_psychro_duct_rh_ema_ = s;
+  }
+  void set_tel_io_volts_out(sensor::Sensor *s) { tel_io_volts_out_ = s; }
+  void set_tel_io_steam_mass_lbs(sensor::Sensor *s) {
+    tel_io_steam_mass_lbs_ = s;
+  }
+  void set_tel_health_chi_ema(sensor::Sensor *s) { tel_health_chi_ema_ = s; }
+
+  void set_tel_feasibility_is_infeasible(binary_sensor::BinarySensor *s) {
+    tel_feasibility_is_infeasible_ = s;
+  }
+  void set_tel_batch_boil_achieved(binary_sensor::BinarySensor *s) {
+    tel_batch_boil_achieved_ = s;
+  }
+  void set_tel_batch_stasis_active(binary_sensor::BinarySensor *s) {
+    tel_batch_stasis_active_ = s;
+  }
+
+  void set_tel_limiters_active_limit(text_sensor::TextSensor *s) {
+    tel_limiters_active_limit_ = s;
+  }
 
   // =========================================================================
   // COMPONENT LIFECYCLE
@@ -197,7 +286,9 @@ private:
   // CONSTANTS
   // =========================================================================
   static constexpr float P_ATM = 88.6f;
-  static constexpr float RHO = 1.041f; // kg/m^3
+  static constexpr float RHO =
+      1.041f; // kg/m^3 (Amarillo, TX approx indoor air density at 88.6 kPa
+              // equivalent to 0.065 lbs/ft^3)
   static constexpr float EMA_ALPHA = 0.1f;
   static constexpr float CHI_ALPHA = 0.00006f;
   static constexpr float MAX_DUCT_DP = 15.56f; // 60F in C
@@ -217,8 +308,8 @@ private:
   static constexpr int DEADMAN_TIMEOUT_MS = 120000;
   static constexpr int BOILING_MIN_TICKS = 120;
   static constexpr float BOILING_MIN_VOLTAGE = 1.0f;
-  static constexpr float DEFAULT_TARGET_DP = 4.4f;     // 40F in C default
-  static constexpr float DEFAULT_MAX_CAPACITY = 2.27f; // 5 lbs/hr in kg/hr
+  static constexpr float DEFAULT_TARGET_DP = 4.4f;       // 40F in C default
+  static constexpr float DEFAULT_MAX_CAPACITY = 1.2247f; // 2.7 lbs/hr in kg/hr
   static constexpr int NVS_PERSIST_TICKS = 60;
 
   // =========================================================================
@@ -259,6 +350,13 @@ private:
   bool stasis_active_ = false;
   int stasis_timer_sec_ = 0;
   float ideal_voltage_ = 0.0f;
+  int upward_rate_ticks_ = 0;
+  int downward_rate_ticks_ = 0;
+
+  // Shadow Integrator (Mode C — Desk Mode only)
+  float shadow_prod_voltage_ = -1.0f;
+  bool shadow_mode_active_ = false;
+  uint32_t shadow_last_update_ms_ = 0;
 
   // Physical Metrics & Limiters
   float duct_derivative_ = 0.0f;
@@ -337,8 +435,11 @@ private:
   sensor::Sensor *duct_temp_sensor_{nullptr};
   sensor::Sensor *duct_rh_sensor_{nullptr};
   sensor::Sensor *supply_flow_sensor_{nullptr};
+  sensor::Sensor *supply_ha_flow_sensor_{nullptr};
   sensor::Sensor *extract_flow_sensor_{nullptr};
+  sensor::Sensor *extract_ha_flow_sensor_{nullptr};
   sensor::Sensor *bypass_sensor_{nullptr};
+  sensor::Sensor *bypass_ha_sensor_{nullptr};
 
   // Outdoor
   sensor::Sensor *outdoor_temp_sensor_{nullptr};
@@ -361,7 +462,7 @@ private:
   sensor::Sensor *supply_ha_rh_sensor_{nullptr};
 
   // Settings
-  number::Number *max_capacity_number_{nullptr};
+  sensor::Sensor *max_capacity_sensor_{nullptr};
   sensor::Sensor *target_dew_point_sensor{nullptr};
 
   // PID Tuning Entity Numbersences
@@ -374,11 +475,44 @@ private:
   // Output references
   output::FloatOutput *steam_dac_ = nullptr;
   output::FloatOutput *fan_dac_ = nullptr;
-  switch_::Switch *safety_relay_ = nullptr;
 
   // Text sensor references
   text_sensor::TextSensor *fsm_text_ = nullptr;
   text_sensor::TextSensor *fault_text_ = nullptr;
+
+  // Opt-in Telemetry Pointers
+  sensor::Sensor *tel_feasibility_max_achievable_dp_ = nullptr;
+  sensor::Sensor *tel_feasibility_total_loss_cfm_ = nullptr;
+  sensor::Sensor *tel_loop_a_pv_room_dp_ = nullptr;
+  sensor::Sensor *tel_loop_a_error_ = nullptr;
+  sensor::Sensor *tel_loop_a_p_term_ = nullptr;
+  sensor::Sensor *tel_loop_a_i_term_ = nullptr;
+  sensor::Sensor *tel_loop_a_integrator_ = nullptr;
+  sensor::Sensor *tel_loop_a_output_target_ = nullptr;
+  sensor::Sensor *tel_loop_b_pv_duct_dp_ = nullptr;
+  sensor::Sensor *tel_loop_b_error_ = nullptr;
+  sensor::Sensor *tel_loop_b_v_ff_ = nullptr;
+  sensor::Sensor *tel_loop_b_p_term_ = nullptr;
+  sensor::Sensor *tel_loop_b_i_term_ = nullptr;
+  sensor::Sensor *tel_loop_b_integrator_ = nullptr;
+  sensor::Sensor *tel_loop_b_ideal_voltage_ = nullptr;
+  sensor::Sensor *tel_batch_stasis_timer_sec_ = nullptr;
+  sensor::Sensor *tel_batch_zero_volt_ticks_ = nullptr;
+  sensor::Sensor *tel_limiters_ceiling_volts_ = nullptr;
+  sensor::Sensor *tel_physics_duct_derivative_ = nullptr;
+  sensor::Sensor *tel_physics_structure_velocity_ = nullptr;
+  sensor::Sensor *tel_psychro_pre_steam_dp_ = nullptr;
+  sensor::Sensor *tel_psychro_outdoor_dp_ = nullptr;
+  sensor::Sensor *tel_psychro_duct_rh_ema_ = nullptr;
+  sensor::Sensor *tel_io_volts_out_ = nullptr;
+  sensor::Sensor *tel_io_steam_mass_lbs_ = nullptr;
+  sensor::Sensor *tel_health_chi_ema_ = nullptr;
+
+  binary_sensor::BinarySensor *tel_feasibility_is_infeasible_ = nullptr;
+  binary_sensor::BinarySensor *tel_batch_boil_achieved_ = nullptr;
+  binary_sensor::BinarySensor *tel_batch_stasis_active_ = nullptr;
+
+  text_sensor::TextSensor *tel_limiters_active_limit_ = nullptr;
 
   // =========================================================================
   // PRIVATE METHODS (implemented in hapsic.cpp)

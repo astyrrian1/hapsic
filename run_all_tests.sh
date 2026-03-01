@@ -31,6 +31,27 @@ else
   exit 1
 fi
 
+echo "=== 6. Validating Native Telemetry Emplacements ==="
+if grep -q "Sim Total CFM Loss" cpp_scenarios.txt; then
+  echo "✓ Native ESP32 API Telemetry successfully published to dummy sensor (Sim Total CFM Loss)."
+else
+  echo "❌ ESP32 telemetry failed to publish. Check mapped sensor or hapsic.cpp mappings."
+  cat cpp_scenarios.txt | grep "Sending state" || true
+  exit 1
+fi
+
+echo "=== 7. Psychrometric Unit Tests ==="
+python3 test_psychrometrics.py
+echo "✓ All psychrometric formulas validated."
+
+echo "=== 8. FSM Transition Matrix Tests ==="
+python3 test_fsm_transitions.py
+echo "✓ All FSM state transitions validated."
+
+echo "=== 9. Offline Cross-Platform Parity ==="
+python3 test_offline_parity.py
+echo "✓ Python/C++ offline parity validated."
+
 echo "========================================="
 echo "✅ ALL CI PIPELINE TESTS COMPLETED AND PASSED."
 echo "========================================="
