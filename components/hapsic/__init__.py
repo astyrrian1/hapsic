@@ -1,11 +1,11 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, text_sensor, output, switch, number, button
+from esphome.components import sensor, text_sensor, binary_sensor, output, switch, number, button
 from esphome.const import CONF_ID
 from esphome.core import CORE
 
 DEPENDENCIES = []
-AUTO_LOAD = ["sensor", "text_sensor", "output", "switch", "number", "button", "json"]
+AUTO_LOAD = ["sensor", "text_sensor", "binary_sensor", "output", "switch", "number", "button", "json"]
 
 hapsic_ns = cg.esphome_ns.namespace("hapsic")
 HapsicController = hapsic_ns.class_("HapsicController", cg.PollingComponent)
@@ -16,6 +16,7 @@ CONF_DUCT_RH = "duct_rh_sensor"
 CONF_SUPPLY_FLOW = "supply_flow_sensor"
 CONF_EXTRACT_FLOW = "extract_flow_sensor"
 CONF_BYPASS = "bypass_sensor"
+CONF_BYPASS_HA = "bypass_ha_sensor"
 CONF_OUTDOOR_TEMP = "outdoor_temp_sensor"
 CONF_OUTDOOR_RH = "outdoor_rh_sensor"
 CONF_HOUSE_TEMP = "house_temp_sensor"
@@ -29,13 +30,52 @@ CONF_SUPPLY_CAN_RH = "supply_can_rh_sensor"
 CONF_SUPPLY_HA_TEMP = "supply_ha_temp_sensor"
 CONF_SUPPLY_HA_RH = "supply_ha_rh_sensor"
 CONF_TARGET_DEW_POINT = "target_dew_point_sensor"
-CONF_MAX_CAPACITY_NUM = "max_capacity_number"
+CONF_MAX_CAPACITY_SENSOR = "max_capacity_sensor"
 CONF_MANUAL_RESET_BTN = "manual_reset_button"
 CONF_STEAM_DAC = "steam_dac"
 CONF_FAN_DAC = "fan_dac"
-CONF_SAFETY_RELAY = "safety_relay"
 CONF_FSM_TEXT = "fsm_text_sensor"
 CONF_FAULT_TEXT = "fault_text_sensor"
+
+# Telemetry Keys
+TELEMETRY_SENSORS = [
+    "tel_feasibility_max_achievable_dp",
+    "tel_feasibility_total_loss_cfm",
+    "tel_loop_a_pv_room_dp",
+    "tel_loop_a_error",
+    "tel_loop_a_p_term",
+    "tel_loop_a_i_term",
+    "tel_loop_a_integrator",
+    "tel_loop_a_output_target",
+    "tel_loop_b_pv_duct_dp",
+    "tel_loop_b_error",
+    "tel_loop_b_v_ff",
+    "tel_loop_b_p_term",
+    "tel_loop_b_i_term",
+    "tel_loop_b_integrator",
+    "tel_loop_b_ideal_voltage",
+    "tel_batch_stasis_timer_sec",
+    "tel_batch_zero_volt_ticks",
+    "tel_limiters_ceiling_volts",
+    "tel_physics_duct_derivative",
+    "tel_physics_structure_velocity",
+    "tel_psychro_pre_steam_dp",
+    "tel_psychro_outdoor_dp",
+    "tel_psychro_duct_rh_ema",
+    "tel_io_volts_out",
+    "tel_io_steam_mass_lbs",
+    "tel_health_chi_ema",
+]
+
+TELEMETRY_BINARY_SENSORS = [
+    "tel_feasibility_is_infeasible",
+    "tel_batch_boil_achieved",
+    "tel_batch_stasis_active",
+]
+
+TELEMETRY_TEXT_SENSORS = [
+    "tel_limiters_active_limit",
+]
 
 CONFIG_SCHEMA = (
     cv.Schema(
@@ -46,7 +86,9 @@ CONFIG_SCHEMA = (
             cv.Required(CONF_DUCT_RH): cv.use_id(sensor.Sensor),
             cv.Required(CONF_SUPPLY_FLOW): cv.use_id(sensor.Sensor),
             cv.Required(CONF_EXTRACT_FLOW): cv.use_id(sensor.Sensor),
+            # Zehnder Bypass
             cv.Required(CONF_BYPASS): cv.use_id(sensor.Sensor),
+            cv.Optional(CONF_BYPASS_HA): cv.use_id(sensor.Sensor),
             # Outdoor sensors
             cv.Required(CONF_OUTDOOR_TEMP): cv.use_id(sensor.Sensor),
             cv.Required(CONF_OUTDOOR_RH): cv.use_id(sensor.Sensor),
@@ -66,7 +108,7 @@ CONFIG_SCHEMA = (
             # Target
             cv.Required(CONF_TARGET_DEW_POINT): cv.use_id(sensor.Sensor),
             # Adjustable controls
-            cv.Required(CONF_MAX_CAPACITY_NUM): cv.use_id(number.Number),
+            cv.Required(CONF_MAX_CAPACITY_SENSOR): cv.use_id(sensor.Sensor),
             cv.Required(CONF_MANUAL_RESET_BTN): cv.use_id(button.Button),
             # PID Tuning (Optional)
             cv.Optional("kp_a_number"): cv.use_id(number.Number),
@@ -76,14 +118,21 @@ CONFIG_SCHEMA = (
             # Outputs
             cv.Required(CONF_STEAM_DAC): cv.use_id(output.FloatOutput),
             cv.Required(CONF_FAN_DAC): cv.use_id(output.FloatOutput),
-            cv.Required(CONF_SAFETY_RELAY): cv.use_id(switch.Switch),
             # Text sensors for HA visibility
             cv.Required(CONF_FSM_TEXT): cv.use_id(text_sensor.TextSensor),
             cv.Required(CONF_FAULT_TEXT): cv.use_id(text_sensor.TextSensor),
         }
     )
-    .extend(cv.polling_component_schema("5s"))
 )
+
+for t in TELEMETRY_SENSORS:
+    CONFIG_SCHEMA = CONFIG_SCHEMA.extend({cv.Optional(t): sensor.sensor_schema()})
+for t in TELEMETRY_BINARY_SENSORS:
+    CONFIG_SCHEMA = CONFIG_SCHEMA.extend({cv.Optional(t): binary_sensor.binary_sensor_schema()})
+for t in TELEMETRY_TEXT_SENSORS:
+    CONFIG_SCHEMA = CONFIG_SCHEMA.extend({cv.Optional(t): text_sensor.text_sensor_schema()})
+
+CONFIG_SCHEMA = CONFIG_SCHEMA.extend(cv.polling_component_schema("5s"))
 
 
 async def to_code(config):
@@ -106,8 +155,12 @@ async def to_code(config):
     cg.add(var.set_supply_flow_sensor(sens))
     sens = await cg.get_variable(config[CONF_EXTRACT_FLOW])
     cg.add(var.set_extract_flow_sensor(sens))
+    # Zehnder Bypass
     sens = await cg.get_variable(config[CONF_BYPASS])
     cg.add(var.set_bypass_sensor(sens))
+    if CONF_BYPASS_HA in config:
+        sens = await cg.get_variable(config[CONF_BYPASS_HA])
+        cg.add(var.set_bypass_sensor_ha(sens))
 
     # Outdoor
     t = await cg.get_variable(config[CONF_OUTDOOR_TEMP])
@@ -141,9 +194,9 @@ async def to_code(config):
     sens = await cg.get_variable(config[CONF_TARGET_DEW_POINT])
     cg.add(var.set_target_dew_point_sensor(sens))
 
-    # Max capacity number
-    num = await cg.get_variable(config[CONF_MAX_CAPACITY_NUM])
-    cg.add(var.set_max_capacity_number(num))
+    # Max capacity sensor
+    sens = await cg.get_variable(config[CONF_MAX_CAPACITY_SENSOR])
+    cg.add(var.set_max_capacity_sensor(sens))
 
     # Manual reset button
     btn = await cg.get_variable(config[CONF_MANUAL_RESET_BTN])
@@ -168,11 +221,23 @@ async def to_code(config):
     cg.add(var.set_steam_dac(out))
     out = await cg.get_variable(config[CONF_FAN_DAC])
     cg.add(var.set_fan_dac(out))
-    sw = await cg.get_variable(config[CONF_SAFETY_RELAY])
-    cg.add(var.set_safety_relay(sw))
 
     # Text sensors
     ts = await cg.get_variable(config[CONF_FSM_TEXT])
     cg.add(var.set_fsm_text(ts))
     ts = await cg.get_variable(config[CONF_FAULT_TEXT])
     cg.add(var.set_fault_text(ts))
+
+    # Opt-in Telemetry Mapping
+    for t in TELEMETRY_SENSORS:
+        if t in config:
+            sens = await sensor.new_sensor(config[t])
+            cg.add(getattr(var, f"set_{t}")(sens))
+    for t in TELEMETRY_BINARY_SENSORS:
+        if t in config:
+            sens = await binary_sensor.new_binary_sensor(config[t])
+            cg.add(getattr(var, f"set_{t}")(sens))
+    for t in TELEMETRY_TEXT_SENSORS:
+        if t in config:
+            sens = await text_sensor.new_text_sensor(config[t])
+            cg.add(getattr(var, f"set_{t}")(sens))

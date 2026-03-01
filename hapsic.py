@@ -27,7 +27,7 @@ class HapsicController(hass.Hass):
         try:
             self.MAX_CAPACITY = float(self.get_state("input_number.humidifier_max_capacity"))
         except (ValueError, TypeError):
-            self.MAX_CAPACITY = 5.0     # Fallback default
+            self.MAX_CAPACITY = 2.7     # Fallback default
         
         self.MAX_DUCT_DP = 60.0         # °F
         self.MAX_VOLTAGE = 10.0         # V

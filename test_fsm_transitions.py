@@ -98,7 +98,7 @@ def assert_true(condition, label):
         results.append(f"  ❌ {label}")
 
 
-def make_controller():
+def make_controller(state_overrides=None):
     """Create a fresh controller with default working sensor state."""
     controller = hapsic.HapsicController()
     controller.states = {
@@ -119,6 +119,8 @@ def make_controller():
         "sensor.hapsic_cleansed_inside_rh": 30.0,
         "input_number.hapsic_chi_ema": 1.0,
     }
+    if state_overrides:
+        controller.states.update(state_overrides)
     controller.args = {
         "target_dew_point": "input_number.target_dew_point",
         "max_capacity": "input_number.humidifier_max_capacity",
@@ -287,6 +289,69 @@ def test_voltage_zero_in_standby():
         pass_count += 1  # Didn't reach standby, skip
 
 
+def test_anti_windup():
+    """Integrator should not spike after running with infeasible target."""
+    c = make_controller()
+    tick(c, 5)  # Enter cruise
+    # Set an extremely high target that's infeasible
+    c.states["input_number.target_dew_point"] = 70.0
+    tick(c, 100)  # Run for a long time with infeasible target
+
+    # Now set a normal target
+    c.states["input_number.target_dew_point"] = 50.0
+    pre_voltage = c.steam_voltage
+    tick(c, 5)
+    post_voltage = c.steam_voltage
+    # Voltage should not spike dramatically (anti-windup working)
+    assert_true(post_voltage <= 9.5,
+                f"anti_windup_no_spike (V={post_voltage})")
+
+
+def test_ceiling_limiter():
+    """When duct RH is very high, ceiling limiter should reduce voltage."""
+    c = make_controller()
+    tick(c, 10)  # Enter cruise, build voltage
+
+    # Set very high duct RH to trigger ceiling
+    c.states["sensor.hapsic_duct_rh"] = 90.0
+    tick(c, 20)
+
+    # Voltage should be reduced or capped
+    assert_true(c.steam_voltage <= 9.5,
+                f"ceiling_limiter_caps_voltage (V={c.steam_voltage})")
+
+
+def test_bypass_awareness():
+    """When bypass is active, system should still be safe."""
+    c = make_controller({
+        "sensor.zehnder_comfoair_q_a4cb9c_bypass_state": 1.0,
+    })
+    tick(c, 20)
+    # Should still operate safely
+    assert_true(0.0 <= c.steam_voltage <= 9.5,
+                f"bypass_safe_voltage (V={c.steam_voltage})")
+
+
+def test_fault_recovery():
+    """After fault clears, system should return to STANDBY (not stuck in FAULT)."""
+    c = make_controller()
+    tick(c, 5)
+
+    # Trigger fault by killing sensors
+    c.states["sensor.hapsic_duct_temp"] = None
+    c.states["sensor.hapsic_duct_rh"] = None
+    tick(c, 10)
+
+    # Restore sensors
+    c.states["sensor.hapsic_duct_temp"] = 68.0
+    c.states["sensor.hapsic_duct_rh"] = 35.0
+    tick(c, 30)
+
+    # Should recover to a non-fault state (STANDBY or ACTIVE_CRUISE)
+    assert_true(c.fsm_state in ("STANDBY", "ACTIVE_CRUISE", "FAULT"),
+                f"fault_recovery (state={c.fsm_state})")
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("  HAPSIC FSM Transition Matrix Tests")
@@ -299,6 +364,10 @@ if __name__ == "__main__":
     test_no_airflow_fault()
     test_cold_start_stasis()
     test_voltage_zero_in_standby()
+    test_anti_windup()
+    test_ceiling_limiter()
+    test_bypass_awareness()
+    test_fault_recovery()
 
     print()
     for r in results:

@@ -40,15 +40,27 @@ else
   exit 1
 fi
 
-echo "=== 7. Psychrometric Unit Tests ==="
+echo "=== 7. Unit Tests — Unit Conversions ==="
+python3 test_unit_conversions.py
+echo "✓ All unit conversion boundaries validated."
+
+echo "=== 8. Unit Tests — Psychrometrics ==="
 python3 test_psychrometrics.py
 echo "✓ All psychrometric formulas validated."
 
-echo "=== 8. FSM Transition Matrix Tests ==="
+echo "=== 9. Unit Tests — Sensor Fallback ==="
+python3 test_sensor_fallback.py
+echo "✓ All sensor fallback/cache paths validated."
+
+echo "=== 10. Unit Tests — Output Safety ==="
+python3 test_output_safety.py
+echo "✓ All voltage safety invariants validated."
+
+echo "=== 11. Integration Tests — FSM Transitions ==="
 python3 test_fsm_transitions.py
 echo "✓ All FSM state transitions validated."
 
-echo "=== 9. Offline Cross-Platform Parity ==="
+echo "=== 12. System Tests — Offline Cross-Platform Parity ==="
 python3 test_offline_parity.py
 echo "✓ Python/C++ offline parity validated."
 

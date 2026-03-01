@@ -10,11 +10,11 @@ substitutions:
   filter_window_size: "1"
 
 esphome:
-  name: stamplc-hapsic
-  friendly_name: "HAPSIC 2.2 PLC"
+  name: hapsic-desk
+  friendly_name: "HAPSIC Desk Simulator"
   project:
-    name: "hapsic.gold_master"
-    version: "2.2.0"
+    name: "justinharrison.hapsic-desk"
+    version: "2.3.0"
   platformio_options:
     board_build.flash_mode: dio
     lib_deps:
@@ -25,6 +25,7 @@ esphome:
       - -DARDUINO_USB_CDC_ON_BOOT=1
       - -DARDUINO_USB_MSC_ON_BOOT=0
       - -DARDUINO_USB_DFU_ON_BOOT=0
+      - -DDESK_MODE
 
 esp32:
   board: m5stack-stamps3
@@ -69,18 +70,7 @@ i2c:
   scan: true
   id: bus_a
 
-# PaHUB I2C Multiplexer — virtual I2C buses per channel
-tca9548a:
-  - id: pahub
-    i2c_id: bus_a
-    address: 0x70
-    channels:
-      - bus_id: pahub_ch0   # Steam DAC (MCP4725)
-        channel: 0
-      - bus_id: pahub_ch1   # Fan DAC (MCP4725)
-        channel: 1
-      - bus_id: pahub_ch2   # BAPI Voltmeter (ADS1115)
-        channel: 2
+
 
 # Import external components
 external_components:
@@ -165,17 +155,7 @@ power_supply:
       ignore_strapping_warning: true
     enable_on_boot: true
 
-# I2C GPIO Expander for Relay Control (AW9523 @ 0x59)
-aw9523:
-  - id: gpio_expander
-    address: 0x59
-    i2c_id: bus_a
 
-# ADS1115 ADC for BAPI Voltmeter (on PaHUB Ch2)
-ads1115:
-  - address: 0x48
-    i2c_id: pahub_ch2
-    id: ads_bapi
 
 # =============================================================================
 # MQTT TELEMETRY
@@ -185,22 +165,36 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_username
   password: !secret mqtt_password
-  topic_prefix: hapsic
+  topic_prefix: hapsic-desk
 
 # =============================================================================
 # OUTPUTS (Actuators)
 # =============================================================================
 
 output:
-  # Steam Valve DAC (PaHUB Ch0, MCP4725)
-  - platform: mcp4725
+  # Steam Valve DAC
+  - platform: template
     id: steam_dac
-    i2c_id: pahub_ch0
+    type: float
+    write_action:
+      - logger.log:
+          format: "Desk Steam Output: %.2f V"
+          args: ['state * 10.0']
+      - sensor.template.publish:
+          id: sim_steam_volts
+          state: !lambda 'return state * 10.0;'
 
-  # Fan Override DAC (PaHUB Ch1, MCP4725)
-  - platform: mcp4725
+  # Fan Override DAC
+  - platform: template
     id: fan_dac
-    i2c_id: pahub_ch1
+    type: float
+    write_action:
+      - logger.log:
+          format: "Desk Fan Output: %.2f V"
+          args: ['state * 10.0']
+      - sensor.template.publish:
+          id: sim_fan_volts
+          state: !lambda 'return state * 10.0;'
 
 # =============================================================================
 # BINARY SENSOR — Required by zehnder_comfoair_q component header
@@ -234,50 +228,131 @@ button:
   - platform: restart
     name: "HAPSIC Reboot"
 
-# =============================================================================
-# NUMBER — Max Steam Capacity (auto-appears in HA, adjustable)
-# =============================================================================
-
+  - platform: safe_mode
+    name: "HAPSIC Safe Mode Restart"
+    id: hapsic_safe_mode
+    
 # =============================================================================
 # NUMBER — Max Steam Capacity (Moved to Home Assistant Sensor Cache)
 # =============================================================================
-
 
 # =============================================================================
 # SENSORS
 # =============================================================================
 
 sensor:
+  - platform: template
+    name: "Desk Simulated Steam Voltage"
+    id: sim_steam_volts
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    
+  - platform: template
+    name: "Desk Simulated Fan Voltage"
+    id: sim_fan_volts
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+
   # ===========================================================================
   # LOCAL HARDWARE SENSORS
   # ===========================================================================
 
-  # --- DS18B20 Duct Temperature ---
-  - platform: dallas_temp
-    one_wire_id: onewire_bus
-    name: "HAPSIC Duct Temp"
+  # --- Desk Mode: Shelly HA Shadows for Duct Sensors ---
+  - platform: homeassistant
+    name: "HAPSIC Duct Temp (Desk Mode)"
+    entity_id: sensor.shelly0110dimg3_28372f3e866c_temperature_2
     id: duct_temp_ds18b20
-    update_interval: 2s
+    filters:
+      - lambda: return (x - 32.0) * (5.0 / 9.0);
 
-  # --- BAPI 0-10V Humidity (Voltmeter Unit on PaHUB Ch2, ADS1115) ---
-  - platform: ads1115
-    ads1115_id: ads_bapi
-    multiplexer: 'A0_GND'
-    gain: 6.144
-    name: "BAPI Raw Voltage"
-    id: bapi_volts
-    update_interval: 2s
-    on_value:
-      then:
-        - sensor.template.publish:
-            id: duct_rh_scaled
-            state: !lambda 'return (x / 10.0) * 100.0;'
-
-  - platform: template
-    name: "HAPSIC Duct Humidity"
+  - platform: homeassistant
+    name: "HAPSIC Duct Humidity (Desk Mode)"
+    entity_id: sensor.shelly0110dimg3_28372f3e866c_input_100_analog
     id: duct_rh_scaled
-    unit_of_measurement: "%"
-    accuracy_decimals: 1
+
+  # --- Desk Mode: HA Shadows for zehnder_comfoair_q CAN Sensors ---
+  - platform: homeassistant
+    name: "HA Shadow Supply Flow"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow
+    id: ha_shadow_supply_flow
+    on_value:
+      - sensor.template.publish:
+          id: supply_fan_flow
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Exhaust Flow"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_extract_fan_flow
+    id: ha_shadow_extract_flow
+    on_value:
+      - sensor.template.publish:
+          id: exhaust_fan_flow
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Supply Humidity"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_supply_air_humidity
+    id: ha_shadow_supply_rh
+
+  - platform: homeassistant
+    name: "HA Shadow Extract Air Temp"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_extract_air_temperature
+    id: ha_shadow_extract_temp
+    filters:
+      - lambda: return ((x - 32.0) * 5.0 / 9.0) * 10.0;
+    on_value:
+      - sensor.template.publish:
+          id: extract_air_temp
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Extract Air Humidity"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity
+    id: ha_shadow_extract_rh
+    on_value:
+      - sensor.template.publish:
+          id: extract_air_humidity
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Supply Air Temp"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_supply_air_temperature
+    id: ha_shadow_supply_temp
+    filters:
+      - lambda: return ((x - 32.0) * 5.0 / 9.0) * 10.0;
+    on_value:
+      - sensor.template.publish:
+          id: supply_air_temp
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Outdoor Air Temp"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_outside_air_temperature
+    id: ha_shadow_outdoor_temp
+    filters:
+      - lambda: return ((x - 32.0) * 5.0 / 9.0) * 10.0;
+    on_value:
+      - sensor.template.publish:
+          id: outdoor_air_temp
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Outdoor Air Humidity"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_outside_air_humidity
+    id: ha_shadow_outdoor_rh
+    on_value:
+      - sensor.template.publish:
+          id: outdoor_air_humidity
+          state: !lambda 'return x;'
+
+  - platform: homeassistant
+    name: "HA Shadow Bypass State"
+    entity_id: sensor.zehnder_comfoair_q_a4cb9c_bypass_state
+    id: ha_shadow_bypass_state
+    on_value:
+      - sensor.template.publish:
+          id: bypass_state
+          state: !lambda 'return x;'
 
   # ===========================================================================
   # ZEHNDER CAN TEMPLATE SENSORS (populated via on_frame PDO callbacks)
@@ -382,6 +457,8 @@ sensor:
     name: "House Avg Temperature"
     entity_id: sensor.house_average_temperature
     id: room_avg_temp_ha
+    filters:
+      - lambda: return (x - 32.0) * (5.0 / 9.0);
 
   - platform: homeassistant
     name: "House Avg Humidity"
@@ -392,6 +469,8 @@ sensor:
     name: "HA Shadow Extract Air Temp"
     entity_id: sensor.zehnder_comfoair_q_a4cb9c_extract_air_temperature
     id: extract_air_temp_ha
+    filters:
+      - lambda: return (x - 32.0) * (5.0 / 9.0);
 
   - platform: homeassistant
     name: "HA Shadow Extract Air Humidity"
@@ -407,11 +486,6 @@ sensor:
     name: "HA Shadow Supply Flow"
     entity_id: sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow
     id: supply_fan_flow_ha
-
-  - platform: homeassistant
-    name: "HA Shadow Bypass State"
-    entity_id: sensor.zehnder_comfoair_q_a4cb9c_bypass_state
-    id: bypass_state_ha
 
 # =============================================================================
 # TEXT SENSORS — FSM State Published to HA
@@ -435,10 +509,9 @@ text_sensor:
 hapsic:
   duct_temp_sensor: duct_temp_ds18b20
   duct_rh_sensor: duct_rh_scaled
-  supply_flow_sensor: supply_fan_flow
-  extract_flow_sensor: exhaust_fan_flow
+  supply_flow_sensor: ha_shadow_supply_flow
+  extract_flow_sensor: ha_shadow_extract_flow
   bypass_sensor: bypass_state
-  bypass_ha_sensor: bypass_state_ha
   outdoor_temp_sensor: outdoor_air_temp
   outdoor_rh_sensor: outdoor_air_humidity
   house_temp_sensor: room_avg_temp_ha
@@ -448,7 +521,7 @@ hapsic:
   extract_ha_temp_sensor: extract_air_temp_ha
   extract_ha_rh_sensor: extract_air_humidity_ha
   supply_can_temp_sensor: supply_air_temp
-  supply_can_rh_sensor: extract_air_humidity
+  supply_can_rh_sensor: ha_shadow_supply_rh
   supply_ha_temp_sensor: room_avg_temp_ha
   supply_ha_rh_sensor: supply_air_humidity_ha
   target_dew_point_sensor: target_dew_point_ha
@@ -458,66 +531,66 @@ hapsic:
   fan_dac: fan_dac
   fsm_text_sensor: fsm_state_text
   fault_text_sensor: fault_reason_text
-
+# 
   # WARNING: DO NOT RENAME THESE ENTITIES OR CHANGE THEIR IDS.
   # Changing entity names will break historical data continuity and dashboards in Home Assistant.
   tel_feasibility_max_achievable_dp:
-    name: "HAPSIC Max Achievable DP"
+    name: "HAPSIC Max Achievable DP (Desk Mode)"
   tel_feasibility_total_loss_cfm:
-    name: "HAPSIC Total Loss CFM"
+    name: "HAPSIC Total Loss CFM (Desk Mode)"
   tel_loop_a_pv_room_dp:
-    name: "HAPSIC Loop A PV Room DP"
+    name: "HAPSIC Loop A PV Room DP (Desk Mode)"
   tel_loop_a_error:
-    name: "HAPSIC Loop A Error"
+    name: "HAPSIC Loop A Error (Desk Mode)"
   tel_loop_a_p_term:
-    name: "HAPSIC Loop A P Term"
+    name: "HAPSIC Loop A P Term (Desk Mode)"
   tel_loop_a_i_term:
-    name: "HAPSIC Loop A I Term"
+    name: "HAPSIC Loop A I Term (Desk Mode)"
   tel_loop_a_integrator:
-    name: "HAPSIC Loop A Integrator"
+    name: "HAPSIC Loop A Integrator (Desk Mode)"
   tel_loop_a_output_target:
-    name: "HAPSIC Loop A Output Target"
+    name: "HAPSIC Loop A Output Target (Desk Mode)"
   tel_loop_b_pv_duct_dp:
-    name: "HAPSIC Loop B PV Duct DP"
+    name: "HAPSIC Loop B PV Duct DP (Desk Mode)"
   tel_loop_b_error:
-    name: "HAPSIC Loop B Error"
+    name: "HAPSIC Loop B Error (Desk Mode)"
   tel_loop_b_v_ff:
-    name: "HAPSIC Loop B Feedforward"
+    name: "HAPSIC Loop B Feedforward (Desk Mode)"
   tel_loop_b_p_term:
-    name: "HAPSIC Loop B P Term"
+    name: "HAPSIC Loop B P Term (Desk Mode)"
   tel_loop_b_i_term:
-    name: "HAPSIC Loop B I Term"
+    name: "HAPSIC Loop B I Term (Desk Mode)"
   tel_loop_b_integrator:
-    name: "HAPSIC Loop B Integrator"
+    name: "HAPSIC Loop B Integrator (Desk Mode)"
   tel_loop_b_ideal_voltage:
-    name: "HAPSIC Loop B Ideal Voltage"
+    name: "HAPSIC Loop B Ideal Voltage (Desk Mode)"
   tel_batch_stasis_timer_sec:
-    name: "HAPSIC Batch Stasis Timer"
+    name: "HAPSIC Batch Stasis Timer (Desk Mode)"
   tel_batch_zero_volt_ticks:
-    name: "HAPSIC Batch Zero Volt Ticks"
+    name: "HAPSIC Batch Zero Volt Ticks (Desk Mode)"
   tel_limiters_ceiling_volts:
-    name: "HAPSIC Limiters Ceiling Volts"
+    name: "HAPSIC Limiters Ceiling Volts (Desk Mode)"
   tel_physics_duct_derivative:
-    name: "HAPSIC Physics Duct Derivative"
+    name: "HAPSIC Physics Duct Derivative (Desk Mode)"
   tel_physics_structure_velocity:
-    name: "HAPSIC Physics Structure Velocity"
+    name: "HAPSIC Physics Structure Velocity (Desk Mode)"
   tel_psychro_pre_steam_dp:
-    name: "HAPSIC Psychro Pre-Steam DP"
+    name: "HAPSIC Psychro Pre-Steam DP (Desk Mode)"
   tel_psychro_outdoor_dp:
-    name: "HAPSIC Psychro Outdoor DP"
+    name: "HAPSIC Psychro Outdoor DP (Desk Mode)"
   tel_psychro_duct_rh_ema:
-    name: "HAPSIC Psychro Duct RH EMA"
+    name: "HAPSIC Psychro Duct RH EMA (Desk Mode)"
   tel_io_volts_out:
-    name: "HAPSIC IO Volts Out"
+    name: "HAPSIC IO Volts Out (Desk Mode)"
   tel_io_steam_mass_lbs:
-    name: "HAPSIC IO Steam Mass LBS"
+    name: "HAPSIC IO Steam Mass LBS (Desk Mode)"
   tel_health_chi_ema:
-    name: "HAPSIC Health CHI EMA"
+    name: "HAPSIC Health CHI EMA (Desk Mode)"
   tel_feasibility_is_infeasible:
-    name: "HAPSIC Feasibility Is Infeasible"
+    name: "HAPSIC Feasibility Is Infeasible (Desk Mode)"
   tel_batch_boil_achieved:
-    name: "HAPSIC Batch Boil Achieved"
+    name: "HAPSIC Batch Boil Achieved (Desk Mode)"
   tel_batch_stasis_active:
-    name: "HAPSIC Batch Stasis Active"
+    name: "HAPSIC Batch Stasis Active (Desk Mode)"
   tel_limiters_active_limit:
-    name: "HAPSIC Limiters Active Limit"
+    name: "HAPSIC Limiters Active Limit (Desk Mode)"

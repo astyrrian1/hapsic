@@ -167,6 +167,29 @@ def test_boundary_conditions():
     w = mixing_ratio_grains(-10.0, 0.0, P_ATM)
     assert_close(w, 0.0, 0.001, "mixing_ratio_cold_0RH")
 
+def test_ema_filter():
+    """EMA filter: α=0.2, step from 0→100 should converge, steady state should match."""
+    alpha = 0.2
+    ema = 0.0
+    # Step response: 0 → 100
+    for i in range(50):
+        ema = alpha * 100.0 + (1 - alpha) * ema
+    # After 50 steps, should be very close to 100
+    assert_close(ema, 100.0, 0.01, "ema_step_convergence_50ticks")
+
+    # After 10 steps, should be ~89% of target
+    ema10 = 0.0
+    for i in range(10):
+        ema10 = alpha * 100.0 + (1 - alpha) * ema10
+    expected_10 = 100.0 * (1 - (1 - alpha) ** 10)
+    assert_close(ema10, expected_10, 0.01, "ema_step_10ticks")
+
+    # Steady state: constant input = constant output
+    ema_ss = 50.0
+    for i in range(20):
+        ema_ss = alpha * 50.0 + (1 - alpha) * ema_ss
+    assert_close(ema_ss, 50.0, 0.001, "ema_steady_state")
+
 
 if __name__ == "__main__":
     print("=" * 50)
@@ -179,6 +202,7 @@ if __name__ == "__main__":
     test_vff_clamp()
     test_vff_zero_flow()
     test_boundary_conditions()
+    test_ema_filter()
 
     print()
     for r in results:

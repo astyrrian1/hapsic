@@ -53,7 +53,7 @@ def run_comparison():
     
     # Initialize states matching tests.yaml
     controller.states = {
-        "input_number.humidifier_max_capacity": 5.0,
+        "input_number.humidifier_max_capacity": 2.7,
         "input_number.target_dew_point": 50.0, 
         
         # Mapped from CSV
@@ -70,8 +70,8 @@ def run_comparison():
         "sensor.hapsic_duct_temp": 68.0,
         "sensor.hapsic_duct_rh": 35.0,
         
-        "sensor.hapsic_supply_flow": 200.0,
-        "sensor.hapsic_extract_flow": 200.0,
+        "sensor.hapsic_supply_flow": 340.0,
+        "sensor.hapsic_extract_flow": 340.0,
         "sensor.zehnder_comfoair_q_a4cb9c_bypass_state": 0.0,
         
         "input_number.hapsic_chi_ema": 1.0,

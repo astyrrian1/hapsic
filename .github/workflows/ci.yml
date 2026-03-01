@@ -1,76 +1,81 @@
-name: HAPSIC CI Pipeline
+name: HAPSIC CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
 jobs:
-  lint-python:
-    name: Python Linting (Ruff)
+  python-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install Ruff
-        run: pip install ruff
-      - name: Run Ruff Format Check
-        run: ruff format --check . || echo "Ruff format issues found, but allowing to proceed for now"
-      - name: Run Ruff Lint
-        run: ruff check . || echo "Ruff check issues found, but allowing to proceed for now"
+          python-version: '3.12'
 
-  lint-cpp:
-    name: C++ Linting (Clang-Format)
+      - name: Install dependencies
+        run: pip install ruff paho-mqtt
+
+      - name: Lint (ruff)
+        run: ruff check hapsic.py scenario_builder.py scenario_tester.py run_compare.py --select E,W --ignore E501
+
+      - name: Unit Tests - Psychrometrics
+        run: python3 test_psychrometrics.py
+
+      - name: Unit Tests - Unit Conversions
+        run: python3 test_unit_conversions.py
+
+      - name: Unit Tests - Sensor Fallback
+        run: python3 test_sensor_fallback.py
+
+      - name: Unit Tests - Output Safety
+        run: python3 test_output_safety.py
+
+      - name: Integration Tests - FSM Transitions
+        run: python3 test_fsm_transitions.py
+
+      - name: Generate Scenario Data
+        run: python3 scenario_builder.py
+
+      - name: Integration Tests - Python Scenarios
+        run: python3 scenario_tester.py
+
+      - name: Integration Tests - PID Compare
+        run: python3 run_compare.py
+
+  esphome-validation:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
-      - name: Run clang-format
-        run: |
-          # Fails the build if any C++ file is uniquely unformatted
-          find components -name '*.cpp' -o -name '*.h' | xargs clang-format --Werror --dry-run
-          
-  regression-tests:
-    name: ESPHome Native & Python Simulations
-    runs-on: ubuntu-latest
-    needs: [lint-python, lint-cpp]
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python ${{ matrix.python-version }}
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-          cache-dependency-path: '**/requirements.txt' # Fallback if no requirements.txt is fine
-          
+          python-version: '3.12'
+
       - name: Install ESPHome
+        run: pip install esphome
+
+      - name: Create secrets.yaml stub
         run: |
-          pip install esphome
-          
-      - name: Execute Enterprise Regression Suite
-        run: |
-          chmod +x run_all_tests.sh verify.sh run_cpp.sh run_simulation.sh
-          ./run_all_tests.sh
-          
-      - name: Upload Test Trace Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hapsic-test-traces-py${{ matrix.python-version }}
-          path: |
-            cpp_scenarios.txt
-            python_scenarios.txt
-            scenario_data.csv
-            python_sim_output.txt
-          retention-days: 7
+          cat > secrets.yaml << 'EOF'
+          wifi_ssid: "test"
+          wifi_password: "test"
+          mqtt_broker: "127.0.0.1"
+          mqtt_username: "test"
+          mqtt_password: "test"
+          ap_password: "test"
+          api_key: "dGVzdGtleQ=="
+          ota_password: "test"
+          ha_token: "test"
+          EOF
+
+      - name: Validate Production Config
+        run: esphome config stamplc.yaml > /dev/null
+
+      - name: Validate Desk Config
+        run: esphome config stamplc_desk.yaml > /dev/null

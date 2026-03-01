@@ -197,11 +197,7 @@ button:
     name: "Shadow Manual Reset"
     id: shadow_manual_reset
 
-switch:
-  - platform: template
-    name: "Shadow Safety Relay"
-    id: shadow_safety_relay
-    optimistic: true
+
 
 # 3. Outputs
 output:
@@ -245,7 +241,6 @@ hapsic:
   manual_reset_button: shadow_manual_reset
   steam_dac: shadow_steam_dac
   fan_dac: shadow_fan_dac
-  safety_relay: shadow_safety_relay
   fsm_text_sensor: shadow_fsm_state
   fault_text_sensor: shadow_fault_reason
   update_interval: 1s

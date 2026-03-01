@@ -53,6 +53,7 @@ public:
         if (!std::getline(file_, next_line_)) {
           ESP_LOGI("csv_player", "End of CSV file");
           file_.close();
+          exit(0);
           return;
         }
       }

@@ -4,14 +4,16 @@ esphome:
   on_boot:
     priority: 800
     then:
-      - logger.log: "SCENARIO SIMULATION STARTED"
+      - logger.log:
+          format: "SCENARIO SIMULATION STARTED"
+          level: INFO
       # SI defaults that we won't mutate much
       - sensor.template.publish:
           id: sim_target_dew_point
           state: 10.0
-      - number.set:
+      - sensor.template.publish:
           id: sim_max_capacity
-          value: 2.27
+          state: 2.27
 
 globals:
   - id: g_steam_out
@@ -21,7 +23,7 @@ globals:
 host:
 
 logger:
-  level: INFO
+  level: DEBUG
 
 external_components:
   - source:
@@ -92,16 +94,11 @@ sensor:
     name: "sim_avg_rh"
     id: sim_avg_rh
     unit_of_measurement: "%"
-
-number:
   - platform: template
-    name: "Max Capacity"
+    name: "sim_max_capacity"
     id: sim_max_capacity
-    initial_value: 2.27
-    min_value: 0.0
-    max_value: 15.0
-    step: 0.1
-    optimistic: true
+
+# Moved to sensor
 
 button:
   - platform: template
@@ -121,11 +118,7 @@ output:
     write_action:
       - lambda: return;
 
-switch:
-  - platform: template
-    name: "Safety Relay"
-    id: sim_safety_relay
-    optimistic: true
+
 
 text_sensor:
   - platform: template
@@ -154,11 +147,12 @@ hapsic:
   supply_ha_temp_sensor: sim_extract_temp
   supply_ha_rh_sensor: sim_extract_rh
   target_dew_point_sensor: sim_target_dew_point
-  max_capacity_number: sim_max_capacity
+  max_capacity_sensor: sim_max_capacity
   manual_reset_button: sim_manual_reset
   steam_dac: sim_steam_dac
   fan_dac: sim_fan_dac
-  safety_relay: sim_safety_relay
   fsm_text_sensor: sim_fsm_state
   fault_text_sensor: sim_fault_reason
+  tel_feasibility_total_loss_cfm:
+    name: "Sim Total CFM Loss"
   update_interval: 1s

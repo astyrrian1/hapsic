@@ -114,12 +114,6 @@ output:
     write_action:
       - lambda: id(g_fan_out) = state;
 
-switch:
-  - platform: template
-    name: "Safety Relay"
-    id: sim_safety_relay
-    optimistic: true
-
 # 4. Feedback
 text_sensor:
   - platform: template
@@ -154,7 +148,6 @@ hapsic:
   manual_reset_button: sim_manual_reset
   steam_dac: sim_steam_dac
   fan_dac: sim_fan_dac
-  safety_relay: sim_safety_relay
   fsm_text_sensor: sim_fsm_state
   fault_text_sensor: sim_fault_reason
   update_interval: 100ms # Run fast!

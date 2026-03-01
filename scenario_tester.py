@@ -54,14 +54,11 @@ def run_tests():
     controller = hapsic.HapsicController()
     
     controller.states = {
-        "input_number.humidifier_max_capacity": 5.0, # lbs/hr
+        "input_number.humidifier_max_capacity": 2.7, # lbs/hr
         "input_number.target_dew_point": 50.0, # 10C
-        "input_boolean.safety_relay": "on",
         "sensor.hapsic_duct_temp": 68.0,
-        "sensor.hapsic_duct_rh": 30.0,
-        "sensor.hapsic_supply_flow": 235.4, # 400 m3/h in CFM
-        "sensor.hapsic_extract_flow": 235.4,
-        "sensor.zehnder_comfoair_q_a4cb9c_bypass_state": 0.0,
+        "sensor.hapsic_supply_flow": 400.0, # Zehnder CAN native
+        "sensor.hapsic_extract_flow": 400.0,
         "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature": 59.0,
         "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity": 50.0,
         
@@ -92,8 +89,7 @@ def run_tests():
         "extract_avg_temp": "sensor.hapsic_round_room_temp",
         "extract_avg_rh": "sensor.hapsic_round_room_rh",
         "steam_dac": "output.steam_dac",
-        "fan_dac": "output.fan_dac",
-        "safety_relay": "input_boolean.safety_relay"
+        "fan_dac": "output.fan_dac"
     }
     
     controller.initialize()
