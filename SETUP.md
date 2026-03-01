@@ -57,9 +57,9 @@ HAPSIC specifically targets the **M5Stack StamPLC**. This industrial ESP32 DIN-r
 - **AW9523**: I2C IO Expander mapping physical relays.
 - **MCP4725**: I2C DAC controllers creating the explicit 0-10V control signal mappings for the Steam and Fan.
 
-### Flashing via USB
+### A. Flashing via USB (Initial Setup)
 
-To deploy the production engine to a physical StamPLC module over USB:
+To deploy the production engine to a physical StamPLC module for the absolute first time:
 
 1. Connect the StamPLC to your computer via USB-C.
 2. Ensure you have the [CH9102 Serial Drivers](https://docs.m5stack.com/en/core/stamplc) installed if your OS doesn't immediately recognize the device.
@@ -69,7 +69,18 @@ To deploy the production engine to a physical StamPLC module over USB:
    ```
 4. Follow the prompt to select the serial port (e.g., `/dev/tty.usbserial-xxx`). ESPHome will natively compile the C++ classes and push the binary to the chip.
 
-*(Note: Future upgrades can be accomplished via Over-The-Air (OTA) updates simply by executing the same command while on the same WiFi network, selecting the network `Over-The-Air` option instead of `USB`.)*
+### B. Flashing Over-The-Air (WiFi Upgrades)
+
+Once the initial firmware (and `secrets.yaml` WiFi credentials) are successfully flashed via USB, the module will broadcast an OTA endpoint accessible on your local network.
+
+For all subsequent upgrades, you no longer need a physical USB connection:
+
+1. Ensure your laptop/workstation is on the same local network as the StamPLC.
+2. Run the exact same compilation command:
+   ```bash
+   esphome run stamplc.yaml
+   ```
+3. When prompted, select the **`Over-The-Air`** option instead of the physical USB serial port. ESPHome will compile the payload and seamlessly stream the binary via WiFi to update the controller.
 
 ---
 
