@@ -36,4 +36,5 @@ Designed specifically for the M5Stack StamPLC (ESP32), driving:
 ## Development & Testing
 HAPSIC enforces a strict Enterprise-Grade CI/CD pipeline. No Pull Request can be merged unless both the C++ firmware and the Python simulator traces match their calculations **flawlessly**.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for a comprehensive guide on running the test suites, generating simulations, and contributing to the engine.
+- See **[SETUP.md](SETUP.md)** to configure your local toolchain spanning Python, ESPHome, Clang-format, and preparing your M5Stack StamPLC device via USB.
+- See **[CONTRIBUTING.md](CONTRIBUTING.md)** for a comprehensive guide on running the test suites, generating simulations, and contributing to the engine.
