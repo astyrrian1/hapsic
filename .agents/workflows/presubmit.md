@@ -34,6 +34,18 @@ git push origin main
 | 1 | `ruff` | Python linting |
 | 2 | `esphome config` | YAML syntax for production and desk configs |
 | 3 | `esphome compile` | C++ firmware compilation |
-| 4 | `run_all_tests.sh` | Full offline CI (scenarios, simulations, telemetry) |
+| 4 | `run_all_tests.sh` | Full 12-step offline CI (see below) |
 | 5 | `test_component_parity.py` | *(live only)* Mode D component math validation |
 | 6 | `test_shadow_integrator.py` | *(live only)* Mode C voltage convergence validation |
+
+### Offline CI Steps (via `run_all_tests.sh`)
+
+| # | Test | Assertions |
+|---|------|-----------|
+| 1–6 | Config, scenarios, PID compare, C++ sim, telemetry | baseline |
+| 7 | `test_unit_conversions.py` | 26 (imperial/SI boundary) |
+| 8 | `test_psychrometrics.py` | 20 (formulas + EMA) |
+| 9 | `test_sensor_fallback.py` | 10 (fallback chains, cache) |
+| 10 | `test_output_safety.py` | 206 (voltage invariants) |
+| 11 | `test_fsm_transitions.py` | 14 (state machine + safety) |
+| 12 | `test_offline_parity.py` | 9 (Py/C++ parity) |

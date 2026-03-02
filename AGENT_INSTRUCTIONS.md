@@ -35,7 +35,7 @@ Two live validation modes exist for verifying C++/Python parity on the desk unit
 - **Mode D (Component Parity)**: Validates 10 mathematical components individually (room_dp, target_duct_dp, supply_dp, v_ff, max_achievable, fsm_state, ceiling_volts, duct_derivative, etc.). Run `python3 test_component_parity.py`. Use for formula changes, sensor fallback debugging.
 
 ## 7. Presubmit Workflow
-- **Always run `bash run_presubmit.sh` before pushing to GitHub.** This validates lint, YAML config, compilation, and offline tests.
+- **Always run `bash run_presubmit.sh` before pushing to GitHub.** This validates lint, YAML config, compilation, and the full 12-step offline CI suite.
 - **For live validation**, run `bash run_presubmit.sh --live` which adds Mode C and Mode D tests.
 - **After flashing desk firmware**, follow the `/flash-desk` workflow: compile → flash → wait 3 min → run Mode D → run Mode C.
 - **Agent workflows** are defined in `.agents/workflows/`. Use `/presubmit`, `/flash-desk`, and `/live-audit` slash commands.
@@ -53,3 +53,83 @@ Production sensors with designated primary/fallback roles:
 | Max Capacity | `input_number.humidifier_max_capacity` (lbs/hr, default 2.7) | — |
 | Supply Flow | `sensor.hapsic_supply_flow` (m³/h, fallback) | — |
 | Room DP Goal | `sensor.hapsic_room_dew_point` (°F) | — |
+
+## 9. Full Release Qualification
+
+A firmware release is qualified when **all three phases** pass. Do not skip phases or push to GitHub before completing them.
+
+### Phase 1: Offline CI (12 Steps)
+
+Run the full offline CI pipeline:
+```bash
+bash run_presubmit.sh
+```
+
+This executes `run_all_tests.sh` which runs:
+
+| Step | Test | Layer | Assertions |
+|------|------|-------|-----------|
+| 1 | `verify.sh` + ESPHome config (prod + desk) | Config | — |
+| 2 | `scenario_builder.py` | Data gen | — |
+| 3 | `scenario_tester.py` | Integration | 7 scenarios |
+| 4 | `run_compare.py` | Integration | 60 ticks |
+| 5 | C++ native simulation | System | binary run |
+| 6 | Telemetry emplacements | System | grep check |
+| 7 | `test_unit_conversions.py` | Unit | 26 |
+| 8 | `test_psychrometrics.py` | Unit | 20 |
+| 9 | `test_sensor_fallback.py` | Unit | 10 |
+| 10 | `test_output_safety.py` | Unit | 206 |
+| 11 | `test_fsm_transitions.py` | Integration | 14 |
+| 12 | `test_offline_parity.py` | System | 9 |
+
+**Total: 276+ offline assertions. All must pass.**
+
+### Phase 2: Flash & Live Validation
+
+1. Compile and flash the desk unit:
+```bash
+esphome run stamplc_desk.yaml --device /dev/cu.usbmodem101
+```
+
+2. Wait **3 minutes** for cold-start stasis to shatter.
+
+3. Run Mode D (Component Parity, 30 assertions):
+```bash
+python3 test_component_parity.py
+```
+
+4. Run Mode C (Shadow Integrator, 10 assertions):
+```bash
+python3 test_shadow_integrator.py
+```
+
+5. Optionally, run the live MQTT diff auditor for 5+ minutes:
+```bash
+python3 read_mqtt_diff.py
+```
+
+**All Mode D (30/30) and Mode C (10/10) must pass.**
+
+### Phase 3: Commit & Push
+
+Only after Phase 1 and Phase 2 pass:
+```bash
+git add -A
+git commit -m "release: vX.Y.Z — <summary>"
+git push origin main
+```
+
+GitHub Actions CI (`.github/workflows/ci.yml`) will run post-submit as a safety net.
+
+### Test Coverage Summary
+
+| Test File | What It Validates |
+|-----------|-------------------|
+| `test_unit_conversions.py` | Imperial/SI boundary: °F↔°C round-trips, RHO/P_ATM parity, YAML lambda constants |
+| `test_psychrometrics.py` | Magnus-Tetens, mixing ratio, dew point, V_FF, EMA filter |
+| `test_sensor_fallback.py` | Primary→fallback chains, cache expiry, NaN/unavailable/unknown handling |
+| `test_output_safety.py` | Voltage ∈ [0, 9.5] invariant, zero on FAULT/STANDBY, no spikes, extreme deficit |
+| `test_fsm_transitions.py` | State transitions, anti-windup, ceiling limiter, bypass, fault recovery |
+| `test_offline_parity.py` | Python/C++ produce matching states from same CSV data |
+| `test_component_parity.py` | 10 math components match between live Python and C++ via MQTT |
+| `test_shadow_integrator.py` | C++ voltage converges to Python voltage via shadow integrator |
