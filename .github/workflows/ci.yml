@@ -58,8 +58,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install ESPHome
-        run: pip install esphome
+      - name: Install dependencies
+        run: pip install pyyaml
 
       - name: Create secrets.yaml stub
         run: |
@@ -75,11 +75,9 @@ jobs:
           ha_token: "test"
           EOF
 
-      - name: Validate Production Config
-        run: esphome config stamplc.yaml > /dev/null
-        continue-on-error: true
+      - name: Validate YAML Syntax - Production Config
+        run: python3 -c "import yaml; yaml.safe_load(open('stamplc.yaml'))"
 
-      - name: Validate Desk Config
-        run: esphome config stamplc_desk.yaml > /dev/null
-        continue-on-error: true
+      - name: Validate YAML Syntax - Desk Config
+        run: python3 -c "import yaml; yaml.safe_load(open('stamplc_desk.yaml'))"
 
