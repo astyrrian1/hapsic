@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   python-tests:
@@ -62,14 +63,14 @@ jobs:
 
       - name: Create secrets.yaml stub
         run: |
-          cat > secrets.yaml << 'EOF'
+          cat > secrets.yaml <<'EOF'
           wifi_ssid: "test"
           wifi_password: "test"
           mqtt_broker: "127.0.0.1"
           mqtt_username: "test"
           mqtt_password: "test"
           ap_password: "test"
-          api_key: "dGVzdGtleQ=="
+          api_encryption_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE="
           ota_password: "test"
           ha_token: "test"
           EOF
