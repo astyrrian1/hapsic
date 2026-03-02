@@ -31,3 +31,7 @@ scenario_data.csv
 
 # Ignore secrets safely
 secrets.yaml
+.ha_token
+
+# Clangd cache (machine-specific, contains local paths)
+.cache/

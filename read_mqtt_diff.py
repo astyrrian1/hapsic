@@ -1,11 +1,13 @@
 import time
 import json
+import os
 import yaml
 import paho.mqtt.client as mqtt
 
 # Load MQTT configuration from secrets.yaml
 def load_secrets():
-    with open('/Users/justinharrison/hapsic/secrets.yaml', 'r') as f:
+    secrets_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'secrets.yaml')
+    with open(secrets_path, 'r') as f:
         return yaml.safe_load(f)
 
 secrets = load_secrets()

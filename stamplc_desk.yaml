@@ -13,7 +13,7 @@ esphome:
   name: hapsic-desk
   friendly_name: "HAPSIC Desk Simulator"
   project:
-    name: "justinharrison.hapsic-desk"
+    name: "hapsic.desk"
     version: "2.3.0"
   platformio_options:
     board_build.flash_mode: dio
