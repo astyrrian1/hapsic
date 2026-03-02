@@ -143,3 +143,5 @@ Branch auto-deletes after merge.
 | `test_offline_parity.py` | Python/C++ produce matching states from same CSV data |
 | `test_component_parity.py` | 10 math components match between live Python and C++ via MQTT |
 | `test_shadow_integrator.py` | C++ voltage converges to Python voltage via shadow integrator |
+
+<- Final grep scan: zero matches for personal CI trigger verified 2026-03-02T18:50:34Z -->
