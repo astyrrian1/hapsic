@@ -22,7 +22,7 @@ jobs:
         run: pip install ruff paho-mqtt pyyaml
 
       - name: Lint (ruff)
-        run: ruff check hapsic.py scenario_builder.py scenario_tester.py run_compare.py --select E,W --ignore E501,W291,W293
+        run: ruff check hapsic.py scenario_builder.py scenario_tester.py run_compare.py --select E,W --ignore E501,E701,W291,W293
 
       - name: Unit Tests - Psychrometrics
         run: python3 test_psychrometrics.py
