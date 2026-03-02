@@ -3,6 +3,8 @@ This document outlines explicit rules, practices, and expectations for an autono
 
 ## 1. Safety and Assumptions
 - **Never Auto-Run Destructive Commands**: Never automatically run commands that mutate state or cause destructive side effects (e.g., `rm -rf`, `git push --force`, `drop table`, flashing production hardware) without explicit user approval.
+- **Never Push or Open PRs Without Asking**: Always ask the user for explicit approval before running `git push`, opening a pull request, or merging. Commit locally, then present the changes and ask before pushing.
+- **Never Commit Personal Information**: Never commit names, email addresses, home directory paths, WiFi credentials, API keys, or other personally identifiable information. Use `!secret` references for credentials and relative paths for file access.
 - **Do Not Guess Missing Details**: If a prompt is ambiguous or lacks crucial implementation details (e.g., "add authentication"), do not blindly implement a complex sub-system. Stop, propose a plan, and ask for clarification.
 - **Read Before Writing**: Always read existing configuration files, architecture documentation, or relevant source files before suggesting changes. Do not assume the structure of a project.
 

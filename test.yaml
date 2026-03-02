@@ -19,8 +19,8 @@ logger:
   level: VERY_VERBOSE
 
 wifi:
-  ssid: "The Harrison"
-  password: "theharrisons"
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
   ap:
     ssid: "test-usb-ap"
 

@@ -37,8 +37,8 @@ logger:
 api:
 
 wifi:
-  ssid: "The Harrison"
-  password: "theharrisons"
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
   ap:
     ssid: "official-stamplc-ap"
 
