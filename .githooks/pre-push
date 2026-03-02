@@ -1,0 +1,29 @@
+#!/bin/bash
+# ===========================================
+# HAPSIC Pre-Push Hook
+# ===========================================
+# Runs the full presubmit validation before allowing a git push.
+# If any test fails, the push is blocked.
+#
+# Install: this file is auto-installed at .git/hooks/pre-push
+# Manual install: cp .githooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+set -e
+
+echo ""
+echo "🔒 HAPSIC Pre-Push Gate: Running presubmit validation..."
+echo "========================================="
+
+# Run the full offline presubmit (lint + config + compile + 12-step CI)
+bash run_presubmit.sh
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ PRESUBMIT FAILED — push blocked."
+    echo "   Fix the failures above and try again."
+    exit 1
+fi
+
+echo ""
+echo "✅ Presubmit passed. Push proceeding."
+exit 0
