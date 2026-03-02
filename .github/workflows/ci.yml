@@ -76,8 +76,8 @@ jobs:
           EOF
 
       - name: Validate YAML Syntax - Production Config
-        run: python3 -c "import yaml; yaml.safe_load(open('stamplc.yaml'))"
+        run: python3 -c "import yaml; L=type('L',(yaml.SafeLoader,),{}); [L.add_constructor(t,lambda l,n:l.construct_scalar(n)) for t in ['!secret','!lambda','!include','!extend','!remove']]; yaml.load(open('stamplc.yaml'),Loader=L); print('stamplc.yaml OK')"
 
       - name: Validate YAML Syntax - Desk Config
-        run: python3 -c "import yaml; yaml.safe_load(open('stamplc_desk.yaml'))"
+        run: python3 -c "import yaml; L=type('L',(yaml.SafeLoader,),{}); [L.add_constructor(t,lambda l,n:l.construct_scalar(n)) for t in ['!secret','!lambda','!include','!extend','!remove']]; yaml.load(open('stamplc_desk.yaml'),Loader=L); print('stamplc_desk.yaml OK')"
 
