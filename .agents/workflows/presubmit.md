@@ -20,12 +20,17 @@ bash run_presubmit.sh
 bash run_presubmit.sh --live
 ```
 
-3. If all tests pass, the code is safe to commit and push:
+3. If all tests pass, push your branch and open a PR:
 ```bash
+git checkout -b feature/your-change   # if not already on a branch
 git add -A
 git commit -m "your commit message"
-git push origin main
+git push origin feature/your-change
 ```
+
+4. Open a Pull Request on GitHub. CI will run automatically. Squash merge when green.
+
+> **Note:** Direct pushes to `main` are blocked. All changes go through PRs.
 
 ## What Presubmit Validates
 

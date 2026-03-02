@@ -5,8 +5,11 @@
 # Runs the full presubmit validation before allowing a git push.
 # If any test fails, the push is blocked.
 #
-# Install: this file is auto-installed at .git/hooks/pre-push
-# Manual install: cp .githooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+# For feature branches: runs presubmit to catch issues early.
+# Direct pushes to main are blocked by GitHub branch protection;
+# all changes must go through a Pull Request.
+#
+# Install: git config core.hooksPath .githooks
 
 set -e
 

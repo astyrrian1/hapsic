@@ -34,8 +34,14 @@ Two live validation modes exist for verifying C++/Python parity on the desk unit
 - **Mode C (Shadow Integrator)**: The desk unit subscribes to production MQTT and mirrors the PID integrator to track production voltage. Run `python3 test_shadow_integrator.py`. Use for pre-release validation, PID/batch logic changes.
 - **Mode D (Component Parity)**: Validates 10 mathematical components individually (room_dp, target_duct_dp, supply_dp, v_ff, max_achievable, fsm_state, ceiling_volts, duct_derivative, etc.). Run `python3 test_component_parity.py`. Use for formula changes, sensor fallback debugging.
 
-## 7. Presubmit Workflow
-- **Always run `bash run_presubmit.sh` before pushing to GitHub.** This validates lint, YAML config, compilation, and the full 12-step offline CI suite.
+## 7. Development Workflow (PR-Based)
+- **Direct push to `main` is blocked.** All changes must go through a Pull Request.
+- **Branch → PR → CI → Squash Merge** is the required flow:
+  1. `git checkout -b feature/your-change` — branch from `main`
+  2. Make changes and run `bash run_presubmit.sh` (the pre-push hook also runs this automatically)
+  3. `git push origin feature/your-change` — push the branch
+  4. Open a PR on GitHub → CI runs automatically (`python-tests` + `esphome-validation`)
+  5. Squash merge when CI is green → branch auto-deleted
 - **For live validation**, run `bash run_presubmit.sh --live` which adds Mode C and Mode D tests.
 - **After flashing desk firmware**, follow the `/flash-desk` workflow: compile → flash → wait 3 min → run Mode D → run Mode C.
 - **Agent workflows** are defined in `.agents/workflows/`. Use `/presubmit`, `/flash-desk`, and `/live-audit` slash commands.
@@ -110,16 +116,18 @@ python3 read_mqtt_diff.py
 
 **All Mode D (30/30) and Mode C (10/10) must pass.**
 
-### Phase 3: Commit & Push
+### Phase 3: PR & Merge
 
 Only after Phase 1 and Phase 2 pass:
 ```bash
+git checkout -b release/vX.Y.Z
 git add -A
 git commit -m "release: vX.Y.Z — <summary>"
-git push origin main
+git push origin release/vX.Y.Z
 ```
 
-GitHub Actions CI (`.github/workflows/ci.yml`) will run post-submit as a safety net.
+Then open a PR on GitHub. CI runs automatically. Squash merge when green.
+Branch auto-deletes after merge.
 
 ### Test Coverage Summary
 
