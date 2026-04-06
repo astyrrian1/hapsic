@@ -1,0 +1,208 @@
+blueprint:
+  name: "HAPSIC Maintenance & Awareness"
+  description: >
+    Non-urgent but actionable notifications about HAPSIC system conditions.
+    Alerts include: target dew point infeasibility, fault recovery,
+    and canister health degradation (CHI EMA).
+
+    Each alert type can be independently enabled or disabled.
+  domain: automation
+  author: "astyrrian1"
+  source_url: "https://github.com/astyrrian1/hapsic/blob/main/blueprints/automation/hapsic/hapsic_maintenance_alerts.yaml"
+  input:
+    notify_service:
+      name: "Notification Service"
+      description: >
+        The notification service to use. Select 'persistent_notification'
+        for HA UI banners, or type a custom service like
+        'notify.mobile_app_iphone'.
+      default: "persistent_notification"
+      selector:
+        select:
+          options:
+            - "persistent_notification"
+            - "notify.notify"
+            - "notify.mobile_app"
+          custom_value: true
+    enable_infeasibility_alert:
+      name: "Enable Target Infeasibility Alert"
+      description: >
+        Notify when HAPSIC cannot reach your target dew point for an
+        extended period. Includes the max achievable dew point so you
+        can decide whether to lower your setpoint.
+      default: true
+      selector:
+        boolean:
+    infeasibility_duration:
+      name: "Infeasibility Duration"
+      description: >
+        Minutes the target must be infeasible before alerting.
+        Prevents false alarms from brief transient conditions.
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 120
+          step: 5
+          unit_of_measurement: "minutes"
+          mode: slider
+    enable_fault_cleared_alert:
+      name: "Enable Fault Cleared Alert"
+      description: >
+        Notify when HAPSIC recovers from a fault state and resumes
+        normal operation.
+      default: true
+      selector:
+        boolean:
+    enable_canister_health_alert:
+      name: "Enable Canister Health Alert"
+      description: >
+        Notify when the Canister Health Index (CHI EMA) drops below
+        a threshold, indicating scale buildup and potential need for
+        canister replacement.
+      default: true
+      selector:
+        boolean:
+    chi_threshold:
+      name: "CHI EMA Warning Threshold"
+      description: >
+        Alert when the Canister Health Index EMA drops below this value.
+        A fresh canister reads ~1.0. Values below 0.6 suggest significant
+        scale buildup. Range: 0.0-2.0.
+      default: 0.6
+      selector:
+        number:
+          min: 0.2
+          max: 1.0
+          step: 0.05
+          unit_of_measurement: "ratio"
+          mode: slider
+
+variables:
+  notify_svc: !input notify_service
+  infeasible_enabled: !input enable_infeasibility_alert
+  fault_cleared_enabled: !input enable_fault_cleared_alert
+  canister_enabled: !input enable_canister_health_alert
+  chi_warn: !input chi_threshold
+
+mode: parallel
+max: 3
+max_exceeded: silent
+
+triggers:
+  # Trigger 1: Target infeasible for N minutes
+  - trigger: state
+    entity_id: sensor.hapsic_is_target_infeasible
+    to: "True"
+    for:
+      minutes: !input infeasibility_duration
+    id: "infeasible"
+
+  # Trigger 2: Fault cleared (FSM leaves FAULT)
+  - trigger: state
+    entity_id: sensor.hapsic_fsm_state
+    from: "FAULT"
+    id: "fault_cleared"
+
+  # Trigger 3: CHI EMA drops below threshold
+  - trigger: numeric_state
+    entity_id: input_number.hapsic_chi_ema
+    below: !input chi_threshold
+    id: "canister_degraded"
+
+conditions: []
+
+actions:
+  - choose:
+      # --- Infeasibility Alert ---
+      - conditions:
+          - condition: trigger
+            id: "infeasible"
+          - condition: template
+            value_template: "{{ infeasible_enabled }}"
+        sequence:
+          - variables:
+              max_dp: "{{ states('sensor.hapsic_max_achievable_dp') }}"
+              target_dp: "{{ states('sensor.hapsic_target_duct_dp') }}"
+              msg: >-
+                📉 HAPSIC can't reach your target dew point.
+                Target: {{ target_dp }}°F | Max achievable: {{ max_dp }}°F.
+                Consider lowering your setpoint or check outdoor conditions.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_svc == 'persistent_notification' }}"
+                sequence:
+                  - action: persistent_notification.create
+                    data:
+                      title: "📉 HAPSIC Target Infeasible"
+                      message: "{{ msg }}"
+                      notification_id: "hapsic_infeasible"
+            default:
+              - action: "{{ notify_svc }}"
+                data:
+                  title: "📉 HAPSIC Target Infeasible"
+                  message: "{{ msg }}"
+
+      # --- Fault Cleared Alert ---
+      - conditions:
+          - condition: trigger
+            id: "fault_cleared"
+          - condition: template
+            value_template: "{{ fault_cleared_enabled }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: sensor.hapsic_fsm_state
+                state: "FAULT"
+        sequence:
+          - variables:
+              new_state: "{{ states('sensor.hapsic_fsm_state') }}"
+              msg: >-
+                ✅ HAPSIC fault cleared. Controller now in {{ new_state }}.
+                Humidifier resuming normal operation.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_svc == 'persistent_notification' }}"
+                sequence:
+                  - action: persistent_notification.create
+                    data:
+                      title: "✅ HAPSIC Fault Cleared"
+                      message: "{{ msg }}"
+                      notification_id: "hapsic_fault_cleared"
+            default:
+              - action: "{{ notify_svc }}"
+                data:
+                  title: "✅ HAPSIC Fault Cleared"
+                  message: "{{ msg }}"
+
+      # --- Canister Health Alert ---
+      - conditions:
+          - condition: trigger
+            id: "canister_degraded"
+          - condition: template
+            value_template: "{{ canister_enabled }}"
+        sequence:
+          - variables:
+              chi_val: "{{ states('input_number.hapsic_chi_ema') }}"
+              msg: >-
+                🧪 Canister health declining. CHI EMA: {{ chi_val }}
+                (threshold: {{ chi_warn }}).
+                Scale buildup likely — consider replacing the Aprilaire
+                canister.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_svc == 'persistent_notification' }}"
+                sequence:
+                  - action: persistent_notification.create
+                    data:
+                      title: "🧪 HAPSIC Canister Health Warning"
+                      message: "{{ msg }}"
+                      notification_id: "hapsic_canister_health"
+            default:
+              - action: "{{ notify_svc }}"
+                data:
+                  title: "🧪 HAPSIC Canister Health Warning"
+                  message: "{{ msg }}"

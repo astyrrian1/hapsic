@@ -1,0 +1,121 @@
+blueprint:
+  name: "HAPSIC Daily Status Digest"
+  description: >
+    Sends a once-daily summary of HAPSIC system health at a user-chosen
+    time. Includes house conditions, steam output, estimated energy
+    consumption, canister health, outdoor conditions, and weather forecast.
+
+    Energy estimation uses Aprilaire 801 specs (16A, 124V = 1,984W max)
+    scaled by the current steam voltage setpoint percentage.
+  domain: automation
+  author: "astyrrian1"
+  source_url: "https://github.com/astyrrian1/hapsic/blob/main/blueprints/automation/hapsic/hapsic_daily_digest.yaml"
+  input:
+    notify_service:
+      name: "Notification Service"
+      description: >
+        The notification service to use. Select 'persistent_notification'
+        for HA UI banners, or type a custom service like
+        'notify.mobile_app_iphone'.
+      default: "persistent_notification"
+      selector:
+        select:
+          options:
+            - "persistent_notification"
+            - "notify.notify"
+            - "notify.mobile_app"
+          custom_value: true
+    report_time:
+      name: "Report Time"
+      description: "Time of day to send the daily digest."
+      default: "08:00:00"
+      selector:
+        time:
+    weather_entity:
+      name: "Weather Entity"
+      description: >
+        The weather entity to use for outdoor conditions and forecast.
+        Select your preferred provider (NWS, OpenWeatherMap, etc.).
+      default: "weather.kama"
+      selector:
+        entity:
+          filter:
+            - domain: weather
+
+variables:
+  notify_svc: !input notify_service
+  weather_ent: !input weather_entity
+  # --- House Conditions ---
+  fsm_state: "{{ states('sensor.hapsic_fsm_state') }}"
+  house_rh: "{{ states('sensor.hapsic_room_average_rh_broken') }}"
+  house_temp: "{{ states('sensor.hapsic_room_average_temp_broken') }}"
+  house_dp: "{{ states('sensor.hapsic_room_dew_point') }}"
+  target_dp: "{{ states('sensor.hapsic_target_duct_dp') }}"
+  room_deficit: "{{ states('sensor.hapsic_room_deficit') }}"
+  # --- Steam ---
+  steam_v: "{{ states('sensor.hapsic_steam_voltage') | float(0) }}"
+  steam_mass: "{{ states('sensor.hapsic_steam_mass') }}"
+  # --- Energy (Aprilaire 801: 16A × 124V = 1984W max) ---
+  power_now_w: "{{ (steam_v / 10.0) * 1984 }}"
+  power_now_kw: "{{ (power_now_w / 1000) | round(2) }}"
+  # --- Canister Health ---
+  chi_ema: "{{ states('input_number.hapsic_chi_ema') }}"
+  chi_instant: "{{ states('sensor.hapsic_chi_instant') }}"
+  # --- Outdoor & Weather ---
+  outdoor_dp: "{{ states('sensor.hapsic_pre_steam_dp') }}"
+  weather_state: "{{ states(weather_ent) }}"
+  weather_temp: "{{ state_attr(weather_ent, 'temperature') }}"
+  weather_humidity: "{{ state_attr(weather_ent, 'humidity') }}"
+  weather_wind: "{{ state_attr(weather_ent, 'wind_speed') }}"
+  # --- Infeasibility ---
+  is_infeasible: "{{ states('sensor.hapsic_is_target_infeasible') }}"
+  max_achievable: "{{ states('sensor.hapsic_max_achievable_dp') }}"
+  # --- Boil Status ---
+  boil_status: "{{ states('sensor.hapsic_boil_status') }}"
+  # --- Build the message ---
+  report_msg: >-
+    HAPSIC Daily Report
+
+    State: {{ fsm_state }} | Boil: {{ boil_status }}
+
+    House: {{ house_rh }}% RH | {{ house_temp }}°F | DP {{ house_dp }}°F
+    Target: {{ target_dp }}°F DP (deficit: {{ room_deficit }}°F)
+    {% if is_infeasible == 'True' -%}
+    ⚠ Target infeasible — max achievable: {{ max_achievable }}°F
+    {% endif -%}
+
+    Steam: {{ steam_v }}V ({{ ((steam_v | float(0)) / 10.0 * 100) | round(0) }}%) | {{ steam_mass }} kg/h
+    Power: ~{{ power_now_kw }} kW ({{ power_now_w | round(0) }}W of 1984W max)
+
+    Canister: CHI EMA {{ chi_ema }} | Instant {{ chi_instant }}
+    {% if chi_ema | float(1.0) < 0.6 -%}
+    ⚠ Canister health low — consider replacement
+    {% endif -%}
+
+    Weather: {{ weather_state | title }} | {{ weather_temp }}°F | {{ weather_humidity }}% RH | Wind {{ weather_wind }} mph
+    Outdoor DP: {{ outdoor_dp }}°F
+
+mode: single
+
+triggers:
+  - trigger: time
+    at: !input report_time
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_svc == 'persistent_notification' }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: "📊 HAPSIC Daily Report"
+              message: "{{ report_msg }}"
+              notification_id: "hapsic_daily_digest"
+    default:
+      - action: "{{ notify_svc }}"
+        data:
+          title: "📊 HAPSIC Daily Report"
+          message: "{{ report_msg }}"

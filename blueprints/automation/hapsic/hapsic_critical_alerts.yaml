@@ -1,0 +1,83 @@
+blueprint:
+  name: "HAPSIC Critical Fault Alerts"
+  description: >
+    Sends an immediate notification when HAPSIC enters a fault state.
+    The message dynamically reflects the fault reason (zero flow, sensor
+    failure, clogged filter, defrost, bypass, or watchdog timeout).
+
+    Configure the notification target and cooldown between repeat alerts.
+  domain: automation
+  author: "astyrrian1"
+  source_url: "https://github.com/astyrrian1/hapsic/blob/main/blueprints/automation/hapsic/hapsic_critical_alerts.yaml"
+  input:
+    notify_service:
+      name: "Notification Service"
+      description: >
+        The notification service to use. Select 'persistent_notification'
+        for HA UI banners, or type a custom service like
+        'notify.mobile_app_iphone'.
+      default: "persistent_notification"
+      selector:
+        select:
+          options:
+            - "persistent_notification"
+            - "notify.notify"
+            - "notify.mobile_app"
+          custom_value: true
+    cooldown_minutes:
+      name: "Re-notification Cooldown"
+      description: >
+        Minimum minutes between repeat notifications while HAPSIC remains
+        in a fault state. Prevents notification spam during cycling faults
+        like defrost.
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 1440
+          step: 5
+          unit_of_measurement: "minutes"
+          mode: slider
+
+variables:
+  notify_svc: !input notify_service
+  fault_messages:
+    "Zero Flow": "⚠️ Airflow stopped. Humidifier parked. Check ventilation system power."
+    "Sensor Failure": "🌡️ Sensor offline. Humidifier parked. Check sensor connections."
+    "CLOGGED FILTER": "🔴 Sustained supply/exhaust imbalance detected. Humidifier locked. Replace ERV filters and restart controller."
+    "Defrost Active": "❄️ ERV defrost cycle. Humidifier temporarily parked. Will auto-resume."
+    "Economizer Bypass": "🌀 ERV bypass open. Humidifier parked to prevent waste."
+    "Deadman Watchdog": "💀 Telemetry stale >120s. Controller may have crashed. Check system logs."
+  fault_reason: "{{ states('sensor.hapsic_fault_reason') }}"
+  fault_msg: >-
+    {{ fault_messages.get(fault_reason,
+       '🔧 Unknown fault: ' ~ fault_reason ~ '. Check HAPSIC logs.') }}
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: sensor.hapsic_fsm_state
+    to: "FAULT"
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_svc == 'persistent_notification' }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: "🚨 HAPSIC Fault Alert"
+              message: "{{ fault_msg }}"
+              notification_id: "hapsic_fault_alert"
+    default:
+      - action: "{{ notify_svc }}"
+        data:
+          title: "🚨 HAPSIC Fault Alert"
+          message: "{{ fault_msg }}"
+  - delay:
+      minutes: !input cooldown_minutes
