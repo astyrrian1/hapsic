@@ -1,0 +1,30 @@
+# =============================================================================
+# HAPSIC Ruff Configuration
+# =============================================================================
+# Ruff: fast Python linter + formatter. Install: brew install ruff
+# Run:  ruff check .          (lint)
+#       ruff check . --fix    (auto-fix safe issues)
+#       ruff format .         (format)
+
+target-version = "py311"
+line-length = 120
+
+[lint]
+# Enable default rules (pyflakes F, pycodestyle E/W) plus:
+#   I = isort (import ordering)
+select = ["E", "F", "W", "I"]
+
+# Intentional suppressions:
+#   E402 - Test files must inject mocks before importing hapsic
+#   E701 - Compact one-liner if/value mappings in scenario_tester.py
+ignore = ["E402", "E701"]
+
+[lint.per-file-ignores]
+# Live-system scripts may have unused imports for interactive use
+"capture.py" = ["F401"]
+"read_logs.py" = ["F401"]
+"read_mqtt_diff.py" = ["F401"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

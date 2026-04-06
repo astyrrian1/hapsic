@@ -1,8 +1,20 @@
+# =============================================================================
+# HAPSIC clang-format Configuration
+# =============================================================================
+# C++ code formatting for ESP32/ESPHome firmware.
+# Run:  /opt/homebrew/opt/llvm/bin/clang-format --dry-run components/hapsic/*.cpp  (check)
+#       /opt/homebrew/opt/llvm/bin/clang-format -i components/hapsic/*.cpp          (fix)
+
 BasedOnStyle: Google
 IndentWidth: 2
-ColumnLimit: 80
+ColumnLimit: 120
 SortIncludes: false
 AllowShortIfStatementsOnASingleLine: false
-EmptyLineAfterAccessModifier: leave
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+EmptyLineAfterAccessModifier: Leave
+BreakBeforeBraces: Attach
+SpaceBeforeParens: ControlStatements
 # Prevent C++ FSM bugs with strict pointer alignment
 PointerAlignment: Right
+IncludeBlocks: Preserve

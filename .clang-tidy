@@ -1,0 +1,40 @@
+# =============================================================================
+# HAPSIC clang-tidy Configuration
+# =============================================================================
+# Static analysis for ESP32/ESPHome C++ embedded firmware.
+# Run:  /opt/homebrew/opt/llvm/bin/clang-tidy components/hapsic/hapsic.cpp
+#
+# Checks enabled:
+#   - bugprone-*        : Common bug patterns (use-after-move, narrowing, etc.)
+#   - performance-*     : Unnecessary copies, inefficient containers
+#   - readability-*     : Naming, braces, magic numbers
+#   - modernize-*       : Use modern C++ (nullptr, auto, range-for)
+#   - clang-analyzer-*  : Deep static analysis (null deref, dead stores)
+
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  clang-analyzer-*,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -bugprone-easily-swappable-parameters,
+  -readability-function-cognitive-complexity
+
+# ESPHome/Arduino headers won't match project naming conventions
+HeaderFilterRegex: 'components/hapsic/.*'
+
+WarningsAsErrors: ''
+
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: '_'
