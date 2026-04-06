@@ -25,7 +25,7 @@ Requires:
     - paho-mqtt, pyyaml installed
 """
 
-from test_harness import HapsicTestHarness, c_to_f
+from test_harness import HapsicTestHarness
 
 
 class ShadowIntegratorTest(HapsicTestHarness):
@@ -36,9 +36,9 @@ class ShadowIntegratorTest(HapsicTestHarness):
 
     def run_tests(self):
         print(f"\n{'='*60}")
-        print(f"  HAPSIC Mode C: Shadow Integrator Validation")
-        print(f"  Collecting 20 paired MQTT frames (~2 minutes)...")
-        print(f"  (First frames may show divergence during stasis)")
+        print("  HAPSIC Mode C: Shadow Integrator Validation")
+        print("  Collecting 20 paired MQTT frames (~2 minutes)...")
+        print("  (First frames may show divergence during stasis)")
         print(f"{'='*60}\n")
 
         pairs = self.collect_paired_frames(n=20, timeout=180)
@@ -62,7 +62,8 @@ class ShadowIntegratorTest(HapsicTestHarness):
             converged = diff <= 0.5
             if converged:
                 convergence_count += 1
-            print(f"  Frame {i+1}: Py={py_volts:.1f}V  C++={cpp_volts:.1f}V  Δ={diff:.1f}V  {'✅' if converged else '⏳'}")
+            status = '✅' if converged else '⏳'
+            print(f"  Frame {i+1}: Py={py_volts:.1f}V  C++={cpp_volts:.1f}V  Δ={diff:.1f}V  {status}")
 
         # At least 3 of last 5 frames should show convergence
         self.results.append((

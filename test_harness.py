@@ -9,11 +9,12 @@ Usage:
     Subclass HapsicTestHarness, implement run_tests(), call self.execute().
 """
 
-import sys
 import json
+import sys
 import time
-import yaml
+
 import paho.mqtt.client as mqtt
+import yaml
 from paho.mqtt.client import CallbackAPIVersion
 
 TOPIC_PROD = "hapsic/telemetry/state"
@@ -182,7 +183,7 @@ class HapsicTestHarness:
         if self.fail_count > 0:
             print(f"  ❌ {self.fail_count} FAILURES")
         else:
-            print(f"  ✅ ALL TESTS PASSED")
+            print("  ✅ ALL TESTS PASSED")
         print("=" * width)
 
     def execute(self):

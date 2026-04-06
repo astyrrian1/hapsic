@@ -25,8 +25,8 @@ class ComponentParityTest(HapsicTestHarness):
 
     def run_tests(self):
         print(f"\n{'='*60}")
-        print(f"  HAPSIC Mode D: Component Parity Validation")
-        print(f"  Collecting 10 paired MQTT frames...")
+        print("  HAPSIC Mode D: Component Parity Validation")
+        print("  Collecting 10 paired MQTT frames...")
         print(f"{'='*60}\n")
 
         pairs = self.collect_paired_frames(n=10, timeout=120)

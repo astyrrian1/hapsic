@@ -16,10 +16,10 @@ Run:
     python3 test_offline_parity.py
 """
 
-import sys
-import subprocess
-import re
 import os
+import re
+import subprocess
+import sys
 
 SCENARIO_CSV = "scenario_data.csv"
 CPP_BINARY = ".esphome/build/hapsic-scenarios/.pioenvs/hapsic-scenarios/program"
@@ -203,5 +203,5 @@ if __name__ == "__main__":
         print(f"  ❌ {fail_count} FAILURES")
         sys.exit(1)
     else:
-        print(f"  ✅ ALL TESTS PASSED")
+        print("  ✅ ALL TESTS PASSED")
         sys.exit(0)

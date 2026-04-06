@@ -21,9 +21,6 @@ Run:
 """
 
 import sys
-import math
-import re
-import os
 
 # -------------------------------------------------------------------------
 # Reference conversion functions (matching YAML lambdas)
@@ -168,7 +165,7 @@ def test_grains_to_gkg():
     """Verify grains/lb ↔ g/kg conversion is physically correct."""
     # 1 lb = 7000 grains (exact definition)
     # 1 g/kg = 1 g per 1000g = 0.001 ratio
-    # grains/lb to g/kg: multiply by (1/7000) * (453.592/1000) * 7000... 
+    # grains/lb to g/kg: multiply by (1/7000) * (453.592/1000) * 7000...
     # Actually: w_grains_per_lb * (1/7000) * 453.592 * (1000/453.592) = w * 1.0
     # The mixing ratio in grains/lb ÷ 7 = mixing ratio in g/kg (approximately)
     # More precisely: 1 grain = 0.06479891 g, 1 lb = 453.59237 g
@@ -243,5 +240,5 @@ if __name__ == "__main__":
         print(f"  ❌ {fail_count} FAILURES")
         sys.exit(1)
     else:
-        print(f"  ✅ ALL TESTS PASSED")
+        print("  ✅ ALL TESTS PASSED")
         sys.exit(0)

@@ -16,8 +16,8 @@ Run:
     python3 test_psychrometrics.py
 """
 
-import sys
 import math
+import sys
 
 # -------------------------------------------------------------------------
 # Reference implementations (extracted from hapsic.py source of truth)
@@ -214,5 +214,5 @@ if __name__ == "__main__":
         print(f"  ❌ {fail_count} FAILURES")
         sys.exit(1)
     else:
-        print(f"  ✅ ALL TESTS PASSED")
+        print("  ✅ ALL TESTS PASSED")
         sys.exit(0)

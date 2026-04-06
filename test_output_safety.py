@@ -15,8 +15,9 @@ Run:
 """
 
 import sys
-import types
 import time
+import types
+
 
 # -------------------------------------------------------------------------
 # Mock AppDaemon
@@ -275,5 +276,5 @@ if __name__ == "__main__":
         print(f"  ❌ {fail_count} FAILURES")
         sys.exit(1)
     else:
-        print(f"  ✅ ALL TESTS PASSED")
+        print("  ✅ ALL TESTS PASSED")
         sys.exit(0)
