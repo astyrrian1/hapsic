@@ -1,0 +1,4 @@
+---
+hapsic_main:
+  module: hapsic_controller
+  class: HapsicController

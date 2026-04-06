@@ -3,6 +3,14 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.2.5] — 2026-04-06
+
+### Fixed
+- **HACS AppDaemon discovery**: Added `apps.yaml` to `apps/hapsic_controller/` so AppDaemon auto-discovers the app when installed via HACS. Previously, HACS installs to `apps/hapsic/` (repo name) which nested the module at `apps/hapsic/apps/hapsic_controller/` — without an `apps.yaml`, AppDaemon couldn't find it, causing users with a prior manual install (`apps/hapsic_controller/`) to silently run stale code.
+
+### Changed
+- Updated `AGENTS.md` with HACS deployment section documenting the folder structure, `apps.yaml` requirement, and known manual-install conflict gotcha.
+
 ## [v2.2.4] — 2026-04-06
 
 **GOLD MASTER — Initial HACS Release**
