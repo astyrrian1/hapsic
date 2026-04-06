@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.components import number, sensor
 from esphome.const import CONF_ID
-from esphome.components import sensor, number
 
 # Namespace match: esphome::csv_player
 csv_player_ns = cg.esphome_ns.namespace('csv_player')
@@ -27,15 +27,15 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    
+
     cg.add(var.set_file(config[CONF_FILE]))
     cg.add(var.set_speed(config[CONF_SPEED]))
-    
+
     if CONF_SENSOR_MAPPINGS in config:
         for key, value in config[CONF_SENSOR_MAPPINGS].items():
             sens = await cg.get_variable(value)
             cg.add(var.add_sensor_mapping(key, sens))
-            
+
     if CONF_NUMBER_MAPPINGS in config:
         for key, value in config[CONF_NUMBER_MAPPINGS].items():
             num = await cg.get_variable(value)

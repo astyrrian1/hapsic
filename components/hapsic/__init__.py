@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, text_sensor, binary_sensor, output, switch, number, button
+from esphome.components import binary_sensor, button, number, output, sensor, text_sensor
 from esphome.const import CONF_ID
 from esphome.core import CORE
 

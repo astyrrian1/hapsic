@@ -54,9 +54,9 @@ class Switch;
 namespace mqtt {
 class MQTTClientComponent;
 extern MQTTClientComponent *global_mqtt_client;
-} // namespace mqtt
+}  // namespace mqtt
 
-} // namespace esphome
+}  // namespace esphome
 
 namespace esphome {
 namespace hapsic {
@@ -72,12 +72,11 @@ struct PsychResult {
 };
 
 class MagnusTetens {
-public:
+ public:
   static constexpr float A = 17.625f;
   static constexpr float B = 243.04f;
 
-  static PsychResult calculate(float temp_c, float rh_percent,
-                               float pressure_kpa);
+  static PsychResult calculate(float temp_c, float rh_percent, float pressure_kpa);
   static float target_w_from_dp(float target_dp_c, float pressure_kpa);
   static float target_dp_from_w(float w_g_kg, float pressure_kpa);
 };
@@ -89,7 +88,7 @@ public:
 struct HapsicPersist {
   float chi_ema;
   float cached_target_rh;
-  uint32_t magic; // 0xABCD1234 = valid data
+  uint32_t magic;  // 0xABCD1234 = valid data
 };
 
 // =============================================================================
@@ -97,8 +96,8 @@ struct HapsicPersist {
 // =============================================================================
 
 class HapsicController : public PollingComponent {
-public:
-  HapsicController() : PollingComponent(5000) {} // 5-second tick
+ public:
+  HapsicController() : PollingComponent(5000) {}  // 5-second tick
 
   // =========================================================================
   // FSM STATES
@@ -122,13 +121,9 @@ public:
   void set_duct_temp_sensor(sensor::Sensor *s) { duct_temp_sensor_ = s; }
   void set_duct_rh_sensor(sensor::Sensor *s) { duct_rh_sensor_ = s; }
   void set_supply_flow_sensor(sensor::Sensor *s) { supply_flow_sensor_ = s; }
-  void set_supply_flow_sensor_ha(sensor::Sensor *s) {
-    supply_ha_flow_sensor_ = s;
-  }
+  void set_supply_flow_sensor_ha(sensor::Sensor *s) { supply_ha_flow_sensor_ = s; }
   void set_extract_flow_sensor(sensor::Sensor *s) { extract_flow_sensor_ = s; }
-  void set_extract_flow_sensor_ha(sensor::Sensor *s) {
-    extract_ha_flow_sensor_ = s;
-  }
+  void set_extract_flow_sensor_ha(sensor::Sensor *s) { extract_ha_flow_sensor_ = s; }
   void set_bypass_sensor(sensor::Sensor *s) { bypass_sensor_ = s; }
   void set_bypass_sensor_ha(sensor::Sensor *s) { bypass_ha_sensor_ = s; }
 
@@ -173,9 +168,7 @@ public:
   }
 
   // Target Setpoint (from HA)
-  void set_target_dew_point_sensor(sensor::Sensor *s) {
-    target_dew_point_sensor = s;
-  }
+  void set_target_dew_point_sensor(sensor::Sensor *s) { target_dew_point_sensor = s; }
 
   // Max capacity (ESPHome sensor component)
   void set_max_capacity_sensor(sensor::Sensor *s) { max_capacity_sensor_ = s; }
@@ -200,80 +193,38 @@ public:
   // =========================================================================
   // Opt-in Telemetry Sensors
   // =========================================================================
-  void set_tel_feasibility_max_achievable_dp(sensor::Sensor *s) {
-    tel_feasibility_max_achievable_dp_ = s;
-  }
-  void set_tel_feasibility_total_loss_cfm(sensor::Sensor *s) {
-    tel_feasibility_total_loss_cfm_ = s;
-  }
-  void set_tel_loop_a_pv_room_dp(sensor::Sensor *s) {
-    tel_loop_a_pv_room_dp_ = s;
-  }
+  void set_tel_feasibility_max_achievable_dp(sensor::Sensor *s) { tel_feasibility_max_achievable_dp_ = s; }
+  void set_tel_feasibility_total_loss_cfm(sensor::Sensor *s) { tel_feasibility_total_loss_cfm_ = s; }
+  void set_tel_loop_a_pv_room_dp(sensor::Sensor *s) { tel_loop_a_pv_room_dp_ = s; }
   void set_tel_loop_a_error(sensor::Sensor *s) { tel_loop_a_error_ = s; }
   void set_tel_loop_a_p_term(sensor::Sensor *s) { tel_loop_a_p_term_ = s; }
   void set_tel_loop_a_i_term(sensor::Sensor *s) { tel_loop_a_i_term_ = s; }
-  void set_tel_loop_a_integrator(sensor::Sensor *s) {
-    tel_loop_a_integrator_ = s;
-  }
-  void set_tel_loop_a_output_target(sensor::Sensor *s) {
-    tel_loop_a_output_target_ = s;
-  }
-  void set_tel_loop_b_pv_duct_dp(sensor::Sensor *s) {
-    tel_loop_b_pv_duct_dp_ = s;
-  }
+  void set_tel_loop_a_integrator(sensor::Sensor *s) { tel_loop_a_integrator_ = s; }
+  void set_tel_loop_a_output_target(sensor::Sensor *s) { tel_loop_a_output_target_ = s; }
+  void set_tel_loop_b_pv_duct_dp(sensor::Sensor *s) { tel_loop_b_pv_duct_dp_ = s; }
   void set_tel_loop_b_error(sensor::Sensor *s) { tel_loop_b_error_ = s; }
   void set_tel_loop_b_v_ff(sensor::Sensor *s) { tel_loop_b_v_ff_ = s; }
   void set_tel_loop_b_p_term(sensor::Sensor *s) { tel_loop_b_p_term_ = s; }
   void set_tel_loop_b_i_term(sensor::Sensor *s) { tel_loop_b_i_term_ = s; }
-  void set_tel_loop_b_integrator(sensor::Sensor *s) {
-    tel_loop_b_integrator_ = s;
-  }
-  void set_tel_loop_b_ideal_voltage(sensor::Sensor *s) {
-    tel_loop_b_ideal_voltage_ = s;
-  }
-  void set_tel_batch_stasis_timer_sec(sensor::Sensor *s) {
-    tel_batch_stasis_timer_sec_ = s;
-  }
-  void set_tel_batch_zero_volt_ticks(sensor::Sensor *s) {
-    tel_batch_zero_volt_ticks_ = s;
-  }
-  void set_tel_limiters_ceiling_volts(sensor::Sensor *s) {
-    tel_limiters_ceiling_volts_ = s;
-  }
-  void set_tel_physics_duct_derivative(sensor::Sensor *s) {
-    tel_physics_duct_derivative_ = s;
-  }
-  void set_tel_physics_structure_velocity(sensor::Sensor *s) {
-    tel_physics_structure_velocity_ = s;
-  }
-  void set_tel_psychro_pre_steam_dp(sensor::Sensor *s) {
-    tel_psychro_pre_steam_dp_ = s;
-  }
-  void set_tel_psychro_outdoor_dp(sensor::Sensor *s) {
-    tel_psychro_outdoor_dp_ = s;
-  }
-  void set_tel_psychro_duct_rh_ema(sensor::Sensor *s) {
-    tel_psychro_duct_rh_ema_ = s;
-  }
+  void set_tel_loop_b_integrator(sensor::Sensor *s) { tel_loop_b_integrator_ = s; }
+  void set_tel_loop_b_ideal_voltage(sensor::Sensor *s) { tel_loop_b_ideal_voltage_ = s; }
+  void set_tel_batch_stasis_timer_sec(sensor::Sensor *s) { tel_batch_stasis_timer_sec_ = s; }
+  void set_tel_batch_zero_volt_ticks(sensor::Sensor *s) { tel_batch_zero_volt_ticks_ = s; }
+  void set_tel_limiters_ceiling_volts(sensor::Sensor *s) { tel_limiters_ceiling_volts_ = s; }
+  void set_tel_physics_duct_derivative(sensor::Sensor *s) { tel_physics_duct_derivative_ = s; }
+  void set_tel_physics_structure_velocity(sensor::Sensor *s) { tel_physics_structure_velocity_ = s; }
+  void set_tel_psychro_pre_steam_dp(sensor::Sensor *s) { tel_psychro_pre_steam_dp_ = s; }
+  void set_tel_psychro_outdoor_dp(sensor::Sensor *s) { tel_psychro_outdoor_dp_ = s; }
+  void set_tel_psychro_duct_rh_ema(sensor::Sensor *s) { tel_psychro_duct_rh_ema_ = s; }
   void set_tel_io_volts_out(sensor::Sensor *s) { tel_io_volts_out_ = s; }
-  void set_tel_io_steam_mass_lbs(sensor::Sensor *s) {
-    tel_io_steam_mass_lbs_ = s;
-  }
+  void set_tel_io_steam_mass_lbs(sensor::Sensor *s) { tel_io_steam_mass_lbs_ = s; }
   void set_tel_health_chi_ema(sensor::Sensor *s) { tel_health_chi_ema_ = s; }
 
-  void set_tel_feasibility_is_infeasible(binary_sensor::BinarySensor *s) {
-    tel_feasibility_is_infeasible_ = s;
-  }
-  void set_tel_batch_boil_achieved(binary_sensor::BinarySensor *s) {
-    tel_batch_boil_achieved_ = s;
-  }
-  void set_tel_batch_stasis_active(binary_sensor::BinarySensor *s) {
-    tel_batch_stasis_active_ = s;
-  }
+  void set_tel_feasibility_is_infeasible(binary_sensor::BinarySensor *s) { tel_feasibility_is_infeasible_ = s; }
+  void set_tel_batch_boil_achieved(binary_sensor::BinarySensor *s) { tel_batch_boil_achieved_ = s; }
+  void set_tel_batch_stasis_active(binary_sensor::BinarySensor *s) { tel_batch_stasis_active_ = s; }
 
-  void set_tel_limiters_active_limit(text_sensor::TextSensor *s) {
-    tel_limiters_active_limit_ = s;
-  }
+  void set_tel_limiters_active_limit(text_sensor::TextSensor *s) { tel_limiters_active_limit_ = s; }
 
   // =========================================================================
   // COMPONENT LIFECYCLE
@@ -281,25 +232,24 @@ public:
   void setup() override;
   void update() override;
 
-private:
+ private:
   // =========================================================================
   // CONSTANTS
   // =========================================================================
   static constexpr float P_ATM = 88.6f;
-  static constexpr float RHO =
-      1.041f; // kg/m^3 (Amarillo, TX approx indoor air density at 88.6 kPa
-              // equivalent to 0.065 lbs/ft^3)
+  static constexpr float RHO = 1.041f;  // kg/m^3 (Amarillo, TX approx indoor air density at 88.6 kPa
+                                        // equivalent to 0.065 lbs/ft^3)
   static constexpr float EMA_ALPHA = 0.1f;
   static constexpr float CHI_ALPHA = 0.00006f;
-  static constexpr float MAX_DUCT_DP = 15.56f; // 60F in C
-  static constexpr float MIN_DUCT_DP = -1.11f; // 30F in C
+  static constexpr float MAX_DUCT_DP = 15.56f;  // 60F in C
+  static constexpr float MIN_DUCT_DP = -1.11f;  // 30F in C
   static constexpr float SLEW_RATE = 0.5f;
-  static constexpr float SOLENOID_MIN = 3.5f; // v2.3.1 hardware constraint
-  static constexpr float DEADBAND = 0.83f;    // 1.5F in C
+  static constexpr float SOLENOID_MIN = 3.5f;  // v2.3.1 hardware constraint
+  static constexpr float DEADBAND = 0.83f;     // 1.5F in C
   static constexpr float TURBO_STEAM_THRESH = 9.5f;
   static constexpr float TURBO_RH_THRESH = 82.0f;
-  static constexpr float TURBO_DEFICIT_THRESH = 1.67f; // 3.0F in C
-  static constexpr float TURBO_FLOW_CONFIRM = 340.0f;  // 200 CFM in m3/h
+  static constexpr float TURBO_DEFICIT_THRESH = 1.67f;  // 3.0F in C
+  static constexpr float TURBO_FLOW_CONFIRM = 340.0f;   // 200 CFM in m3/h
   static constexpr int TURBO_TIMEOUT_TICKS = 12;
   static constexpr int TURBO_LOCKOUT_DURATION = 360;
   static constexpr int FAULT_CLEAR_TICKS = 12;
@@ -308,8 +258,8 @@ private:
   static constexpr int DEADMAN_TIMEOUT_MS = 120000;
   static constexpr int BOILING_MIN_TICKS = 120;
   static constexpr float BOILING_MIN_VOLTAGE = 1.0f;
-  static constexpr float DEFAULT_TARGET_DP = 4.4f;       // 40F in C default
-  static constexpr float DEFAULT_MAX_CAPACITY = 1.2247f; // 2.7 lbs/hr in kg/hr
+  static constexpr float DEFAULT_TARGET_DP = 4.4f;        // 40F in C default
+  static constexpr float DEFAULT_MAX_CAPACITY = 1.2247f;  // 2.7 lbs/hr in kg/hr
   static constexpr int NVS_PERSIST_TICKS = 60;
 
   // =========================================================================
@@ -369,20 +319,20 @@ private:
   float fan_voltage_ = 0.0f;
   float integrator_a_ = 0.0f;
   float integrator_b_ = 0.0f;
-  float target_duct_dp_ = 4.4f; // Default 40F
+  float target_duct_dp_ = 4.4f;  // Default 40F
 
   // =========================================================================
   // PSYCHROMETRIC INTERNAL STATE TRACKING & TIMEOUTS
   // =========================================================================
   float house_temp_avg_ = 0.0f;
   float house_rh_avg_ = 0.0f;
-  float room_dp_ = 0.0f; // Represents the calculated "Inside" condition
+  float room_dp_ = 0.0f;  // Represents the calculated "Inside" condition
   float room_w_ = 0.0f;
   uint32_t last_valid_room_dp_time_ = 0;
 
   float target_room_dp_ = 0.0f;
 
-  float supply_t_ = 0.0f; // Represents the physical pre-steam air
+  float supply_t_ = 0.0f;  // Represents the physical pre-steam air
   float supply_rh_ = 0.0f;
   float supply_dp_ = 0.0f;
   float supply_w_ = 0.0f;
@@ -400,6 +350,7 @@ private:
   float duct_w_ = 0.0f;
   float duct_temp_ = 0.0f;
   float duct_rh_ = 0.0f;
+  float raw_duct_rh_ = 0.0f;
 
   // EMA state
   float ema_duct_temp_ = 0.0f;
@@ -537,5 +488,5 @@ private:
   const char *state_name(State s);
 };
 
-} // namespace hapsic
-} // namespace esphome
+}  // namespace hapsic
+}  // namespace esphome

@@ -441,7 +441,7 @@ sensor:
     name: "Target Dew Point"
     entity_id: input_number.target_dew_point
     id: target_dew_point_ha
-    internal: false
+    internal: true
     filters:
       - lambda: return (x - 32.0) * (5.0 / 9.0);
 
@@ -449,7 +449,7 @@ sensor:
     name: "Max Capacity"
     entity_id: input_number.humidifier_max_capacity
     id: max_capacity_ha
-    internal: false
+    internal: true
     filters:
       - lambda: return x * 0.453592;
 
@@ -457,6 +457,7 @@ sensor:
     name: "House Avg Temperature"
     entity_id: sensor.house_average_temperature
     id: room_avg_temp_ha
+    internal: true
     filters:
       - lambda: return (x - 32.0) * (5.0 / 9.0);
 
@@ -464,11 +465,13 @@ sensor:
     name: "House Avg Humidity"
     entity_id: sensor.house_average_humidity
     id: room_avg_rh_ha
+    internal: true
 
   - platform: homeassistant
     name: "HA Shadow Extract Air Temp"
     entity_id: sensor.zehnder_comfoair_q_a4cb9c_extract_air_temperature
     id: extract_air_temp_ha
+    internal: true
     filters:
       - lambda: return (x - 32.0) * (5.0 / 9.0);
 
@@ -476,16 +479,19 @@ sensor:
     name: "HA Shadow Extract Air Humidity"
     entity_id: sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity
     id: extract_air_humidity_ha
+    internal: true
 
   - platform: homeassistant
     name: "HA Shadow Supply Air Humdity"
     entity_id: sensor.zehnder_comfoair_q_a4cb9c_supply_air_humidity
     id: supply_air_humidity_ha
+    internal: true
 
   - platform: homeassistant
     name: "HA Shadow Supply Flow"
     entity_id: sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow
     id: supply_fan_flow_ha
+    internal: true
 
 # =============================================================================
 # TEXT SENSORS — FSM State Published to HA

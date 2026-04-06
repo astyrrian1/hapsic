@@ -20,15 +20,16 @@ void M5_STAMPLC::begin() {
   M5.begin(cfg);
 }
 
-void M5_STAMPLC::update() { M5.update(); }
+void M5_STAMPLC::update() {
+  M5.update();
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                     I2C                                    */
 /* -------------------------------------------------------------------------- */
 void M5_STAMPLC::i2c_init() {
   m5::In_I2C.release();
-  m5::In_I2C.begin(I2C_NUM_0, STAMPLC_PIN_I2C_INTER_SDA,
-                   STAMPLC_PIN_I2C_INTER_SCL);
+  m5::In_I2C.begin(I2C_NUM_0, STAMPLC_PIN_I2C_INTER_SDA, STAMPLC_PIN_I2C_INTER_SCL);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -62,11 +63,10 @@ void M5_STAMPLC::setBacklight(bool on) {
   auto &ioe = M5.getIOExpander(0);
 
   ioe.setHighImpedance(7, !on);
-  ioe.digitalWrite(7, !on); // backlight is active low
+  ioe.digitalWrite(7, !on);  // backlight is active low
 }
 
-void M5_STAMPLC::setStatusLight(const uint8_t &r, const uint8_t &g,
-                                const uint8_t &b) {
+void M5_STAMPLC::setStatusLight(const uint8_t &r, const uint8_t &g, const uint8_t &b) {
   auto &ioe = M5.getIOExpander(0);
 
   if (r == 0) {
@@ -102,9 +102,9 @@ void M5_STAMPLC::io_expander_b_init() {
   if (!_io_expander_b->begin()) {
     ESP_LOGE(TAG, "io expander b init failed");
   } else {
-    _io_expander_b->configureDirection(0x0); // all inputs!
-    _io_expander_b->openDrainPort0(false);   // push pull default
-    _io_expander_b->interruptEnableGPIO(0);  // no interrupt
+    _io_expander_b->configureDirection(0x0);  // all inputs!
+    _io_expander_b->openDrainPort0(false);    // push pull default
+    _io_expander_b->interruptEnableGPIO(0);   // no interrupt
 
     // Outputs init
     for (const auto &i : _out_pin_list) {
@@ -121,7 +121,9 @@ void M5_STAMPLC::io_expander_b_init() {
   }
 }
 
-AW9523_Class &M5_STAMPLC::getIOExpanderB() { return *_io_expander_b; }
+AW9523_Class &M5_STAMPLC::getIOExpanderB() {
+  return *_io_expander_b;
+}
 
 bool M5_STAMPLC::readPlcInput(const uint8_t &channel) {
   if (_io_expander_b == nullptr) {
@@ -171,7 +173,9 @@ void M5_STAMPLC::lm75b_init() {
   }
 }
 
-float M5_STAMPLC::getTemp() { return LM75B.temp(); }
+float M5_STAMPLC::getTemp() {
+  return LM75B.temp();
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                   INA226                                   */
@@ -191,7 +195,9 @@ void M5_STAMPLC::ina226_init() {
   }
 }
 
-float M5_STAMPLC::getPowerVoltage() { return INA226.getBusVoltage(); }
+float M5_STAMPLC::getPowerVoltage() {
+  return INA226.getBusVoltage();
+}
 
 float M5_STAMPLC::getIoSocketOutputCurrent() {
   return INA226.getShuntCurrent();
@@ -210,9 +216,13 @@ void M5_STAMPLC::rx8130_init() {
   }
 }
 
-void M5_STAMPLC::setRtcTime(struct tm *time) { RX8130.setTime(time); }
+void M5_STAMPLC::setRtcTime(struct tm *time) {
+  RX8130.setTime(time);
+}
 
-void M5_STAMPLC::getRtcTime(struct tm *time) { RX8130.getTime(time); }
+void M5_STAMPLC::getRtcTime(struct tm *time) {
+  RX8130.getTime(time);
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                   Buzzer                                   */

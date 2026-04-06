@@ -16,7 +16,7 @@
 namespace m5 {
 
 class M5_STAMPLC {
-public:
+ public:
   struct Config_t {
     /* Modbus */
     bool enableModbusSlave = false;
@@ -25,8 +25,8 @@ public:
 
     /* CAN */
     bool enableCan = false;
-    long canBaudRate = 1000000; // 25000, 50000, 100000, 125000, 250000, 500000,
-                                // 800000, 1000000
+    long canBaudRate = 1000000;  // 25000, 50000, 100000, 125000, 250000, 500000,
+                                 // 800000, 1000000
 
     /* SD Card */
     bool enableSdCard = false;
@@ -162,8 +162,8 @@ public:
    */
   AW9523_Class &getIOExpanderB();
 
-protected:
-  AW9523_Class *_io_expander_b = nullptr; // Controls plc relays, plc inputs
+ protected:
+  AW9523_Class *_io_expander_b = nullptr;  // Controls plc relays, plc inputs
   Config_t _config;
 
   void i2c_init();
@@ -177,7 +177,7 @@ protected:
   void sd_card_init();
 };
 
-} // namespace m5
+}  // namespace m5
 
 extern m5::M5_STAMPLC *M5StamPLC_ptr;
 #define M5StamPLC (*M5StamPLC_ptr)

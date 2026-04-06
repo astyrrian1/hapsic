@@ -34,7 +34,9 @@ namespace hapsic {
 #ifdef USE_ESP32
 using namespace m5gfx;
 #else
-inline uint64_t esp_timer_get_time() { return millis() * 1000ULL; }
+inline uint64_t esp_timer_get_time() {
+  return millis() * 1000ULL;
+}
 #endif
 
 // Native UI Canvas removed for debugging early-boot memory crashes
@@ -44,8 +46,7 @@ inline uint64_t esp_timer_get_time() { return millis() * 1000ULL; }
 // PSYCHROMETRICS
 // =============================================================================
 
-PsychResult MagnusTetens::calculate(float temp_c, float rh_percent,
-                                    float pressure_kpa) {
+PsychResult MagnusTetens::calculate(float temp_c, float rh_percent, float pressure_kpa) {
   PsychResult result = {-40.0f, 0.0f, false};
 
   if (std::isnan(temp_c) || std::isnan(rh_percent))
@@ -119,11 +120,11 @@ void HapsicController::setup() {
   // Initialize watchdog (5 seconds, panic/reset on timeout)
   esp_task_wdt_config_t wdt_config = {
       .timeout_ms = 5000,
-      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Monitor all idle tasks
+      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,  // Monitor all idle tasks
       .trigger_panic = true,
   };
   esp_task_wdt_init(&wdt_config);
-  esp_task_wdt_add(NULL); // Add current task (main loop)
+  esp_task_wdt_add(NULL);  // Add current task (main loop)
 #endif
 
   if (steam_dac_)
@@ -143,19 +144,16 @@ void HapsicController::setup() {
   last_ha_update_ms_ = esp_timer_get_time() / 1000;
 
   // Load persisted state from NVS
-  pref_ = global_preferences->make_preference<HapsicPersist>(
-      fnv1_hash("hapsic_state"));
+  pref_ = global_preferences->make_preference<HapsicPersist>(fnv1_hash("hapsic_state"));
   HapsicPersist stored;
   if (pref_.load(&stored) && stored.magic == 0xABCD1234) {
     chi_ema_ = stored.chi_ema;
-    cached_target_dp_ = stored.cached_target_rh; // Re-purposed NVRAM slot
-    ESP_LOGI("hapsic", "NVS restored: CHI=%.4f, target_dp=%.1fC", chi_ema_,
-             cached_target_dp_);
+    cached_target_dp_ = stored.cached_target_rh;  // Re-purposed NVRAM slot
+    ESP_LOGI("hapsic", "NVS restored: CHI=%.4f, target_dp=%.1fC", chi_ema_, cached_target_dp_);
   } else {
     chi_ema_ = 1.0f;
     cached_target_dp_ = DEFAULT_TARGET_DP;
-    ESP_LOGI("hapsic", "NVS empty — defaults: CHI=1.0, target_dp=%.1fC",
-             DEFAULT_TARGET_DP);
+    ESP_LOGI("hapsic", "NVS empty — defaults: CHI=1.0, target_dp=%.1fC", DEFAULT_TARGET_DP);
   }
 
   // Reset PRD batch timers
@@ -173,8 +171,7 @@ void HapsicController::setup() {
   }
 
 #ifdef USE_ESP32
-  M5StamPLC.Display.fillRect(0, 0, M5StamPLC.Display.width(),
-                             M5StamPLC.Display.height());
+  M5StamPLC.Display.fillRect(0, 0, M5StamPLC.Display.width(), M5StamPLC.Display.height());
 #endif
 #ifdef DESK_MODE
   // Shadow Integrator: Subscribe to production MQTT for voltage tracking
@@ -201,8 +198,9 @@ void HapsicController::setup() {
           }
         },
         0);
-    ESP_LOGI("hapsic", "SHADOW MODE: Subscribed to hapsic/telemetry/state for "
-                       "production voltage tracking");
+    ESP_LOGI("hapsic",
+             "SHADOW MODE: Subscribed to hapsic/telemetry/state for "
+             "production voltage tracking");
   }
 #endif
 #endif
@@ -216,7 +214,7 @@ void HapsicController::setup() {
 
 void HapsicController::update() {
 #ifdef USE_ESP32
-  esp_task_wdt_reset(); // Pet the watchdog
+  esp_task_wdt_reset();  // Pet the watchdog
 #endif
 
   // Run the super-fast UI updates
@@ -243,8 +241,7 @@ void HapsicController::update() {
 
   // Calculate derivative (1 min apart if filled)
   if (history_filled_) {
-    int oldest_idx =
-        history_idx_; // the oldest value is where we will write next
+    int oldest_idx = history_idx_;  // the oldest value is where we will write next
     duct_derivative_ = duct_dp_ - duct_dp_history_[oldest_idx];
   } else {
     duct_derivative_ = 0.0f;
@@ -258,8 +255,7 @@ void HapsicController::update() {
     turbo_wait_ticks_++;
   if (fsm_state_ == HYGIENIC_PURGE)
     purge_ticks_++;
-  if (fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO ||
-      fsm_state_ == TURBO_PENDING) {
+  if (fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO || fsm_state_ == TURBO_PENDING) {
     active_cruise_ticks_++;
   } else {
     active_cruise_ticks_ = 0;
@@ -287,11 +283,19 @@ void HapsicController::update() {
     execute_loop_a();
   }
 
-  if (fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO ||
-      fsm_state_ == TURBO_PENDING) {
+  if (fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO || fsm_state_ == TURBO_PENDING) {
     execute_loop_b();
   } else {
     steam_voltage_ = 0.0f;
+  }
+
+  // Unfiltered Hardware E-Stop (Overrides ALL loops and states)
+  if (raw_duct_rh_ >= 88.0f) {
+    if (steam_voltage_ > 0.0f) {
+      ESP_LOGW("hapsic", "SAFETY ABORT: Raw Duct RH (%.1f%%) critically high! Forcing 0.0V.", raw_duct_rh_);
+    }
+    steam_voltage_ = 0.0f;
+    stasis_active_ = false;
   }
 
   write_output();
@@ -317,24 +321,24 @@ float HapsicController::sensor_value(sensor::Sensor *s) {
 
 const char *HapsicController::state_name(State s) {
   switch (s) {
-  case INITIALIZING:
-    return "INITIALIZING";
-  case STANDBY:
-    return "STANDBY";
-  case ACTIVE_CRUISE:
-    return "ACTIVE_CRUISE";
-  case TURBO_PENDING:
-    return "TURBO_PENDING";
-  case ACTIVE_TURBO:
-    return "ACTIVE_TURBO";
-  case HYGIENIC_PURGE:
-    return "HYGIENIC_PURGE";
-  case FAULT:
-    return "FAULT";
-  case MAINTENANCE_LOCKOUT:
-    return "MAINTENANCE_LOCKOUT";
-  default:
-    return "UNKNOWN";
+    case INITIALIZING:
+      return "INITIALIZING";
+    case STANDBY:
+      return "STANDBY";
+    case ACTIVE_CRUISE:
+      return "ACTIVE_CRUISE";
+    case TURBO_PENDING:
+      return "TURBO_PENDING";
+    case ACTIVE_TURBO:
+      return "ACTIVE_TURBO";
+    case HYGIENIC_PURGE:
+      return "HYGIENIC_PURGE";
+    case FAULT:
+      return "FAULT";
+    case MAINTENANCE_LOCKOUT:
+      return "MAINTENANCE_LOCKOUT";
+    default:
+      return "UNKNOWN";
   }
 }
 
@@ -348,11 +352,11 @@ bool HapsicController::read_sensors() {
   float raw_duct_rh = sensor_value(duct_rh_sensor_);
 
   if (std::isnan(raw_duct_temp) || std::isnan(raw_duct_rh)) {
-    ESP_LOGW("hapsic", "Duct sensor NaN — temp=%.1f rh=%.1f", raw_duct_temp,
-             raw_duct_rh);
+    ESP_LOGW("hapsic", "Duct sensor NaN — temp=%.1f rh=%.1f", raw_duct_temp, raw_duct_rh);
     return false;
   }
 
+  raw_duct_rh_ = raw_duct_rh;
   ema_duct_temp_ = ema(raw_duct_temp, ema_duct_temp_, ema_duct_initialized_);
   ema_duct_rh_ = ema(raw_duct_rh, ema_duct_rh_, ema_duct_initialized_);
   ema_duct_initialized_ = true;
@@ -421,8 +425,7 @@ bool HapsicController::read_sensors() {
   }
 
   if (!std::isnan(effective_room_temp) && !std::isnan(effective_room_rh)) {
-    auto room_psych =
-        MagnusTetens::calculate(effective_room_temp, effective_room_rh, P_ATM);
+    auto room_psych = MagnusTetens::calculate(effective_room_temp, effective_room_rh, P_ATM);
     if (room_psych.is_valid) {
       room_dp_ = room_psych.dew_point_c;
       room_w_ = room_psych.mixing_ratio_g_kg;
@@ -431,17 +434,13 @@ bool HapsicController::read_sensors() {
       last_valid_room_dp_time_ = now_ms;
     }
   } else {
-    if (now_ms - last_valid_room_dp_time_ < 1800000 &&
-        last_valid_room_dp_time_ > 0) {
-      ESP_LOGW(
-          "hapsic",
-          "All Inside sensors NaN! Using cached DP (%.1fC). Expires in %u s",
-          room_dp_, 1800 - ((now_ms - last_valid_room_dp_time_) / 1000));
+    if (now_ms - last_valid_room_dp_time_ < 1800000 && last_valid_room_dp_time_ > 0) {
+      ESP_LOGW("hapsic", "All Inside sensors NaN! Using cached DP (%.1fC). Expires in %u s", room_dp_,
+               1800 - ((now_ms - last_valid_room_dp_time_) / 1000));
       using_fallback_ = true;
     } else {
-      ESP_LOGE("hapsic",
-               "CRITICAL: All Inside sensors failed and cache expired (>30m).");
-      return false; // Triggers "Sensor Failure" FAULT
+      ESP_LOGE("hapsic", "CRITICAL: All Inside sensors failed and cache expired (>30m).");
+      return false;  // Triggers "Sensor Failure" FAULT
     }
   }
 
@@ -465,8 +464,7 @@ bool HapsicController::read_sensors() {
   }
 
   if (!std::isnan(effective_supply_temp) && !std::isnan(effective_supply_rh)) {
-    auto sup_psych = MagnusTetens::calculate(effective_supply_temp,
-                                             effective_supply_rh, P_ATM);
+    auto sup_psych = MagnusTetens::calculate(effective_supply_temp, effective_supply_rh, P_ATM);
     if (sup_psych.is_valid) {
       supply_dp_ = sup_psych.dew_point_c;
       supply_w_ = sup_psych.mixing_ratio_g_kg;
@@ -477,15 +475,13 @@ bool HapsicController::read_sensors() {
   }
 
   if (std::isnan(effective_supply_temp) || std::isnan(effective_supply_rh)) {
-    if (now_ms - last_valid_supply_w_time_ < 1800000 &&
-        last_valid_supply_w_time_ > 0) {
+    if (now_ms - last_valid_supply_w_time_ < 1800000 && last_valid_supply_w_time_ > 0) {
       ESP_LOGW("hapsic",
                "All Supply sensors NaN! Using cached Supply W (%.1fg/kg). "
                "Expires in %u s",
                supply_w_, 1800 - ((now_ms - last_valid_supply_w_time_) / 1000));
     } else {
-      ESP_LOGE("hapsic",
-               "CRITICAL: All Supply sensors failed and cache expired (>30m).");
+      ESP_LOGE("hapsic", "CRITICAL: All Supply sensors failed and cache expired (>30m).");
       return false;
     }
   }
@@ -495,8 +491,8 @@ bool HapsicController::read_sensors() {
   float od_rh = sensor_value(outdoor_rh_sensor_);
 
   if (std::isnan(od_temp_c) || std::isnan(od_rh)) {
-    od_temp_c = 10.0f; // 50F in C
-    od_rh = 50.0f;     // 50%
+    od_temp_c = 10.0f;  // 50F in C
+    od_rh = 50.0f;      // 50%
     ESP_LOGW("hapsic", "Outdoor sensor NaN, using DEFAULT (10C, 50%%)");
   }
 
@@ -521,21 +517,18 @@ bool HapsicController::read_sensors() {
   }
 
   // --- Mass Balance & Feasibility Horizon ---
-  total_loss_cfm_ = 1380.0f / 17.0f; // CFM_nat -> approximately 81.18 CFM
+  total_loss_cfm_ = 1380.0f / 17.0f;  // CFM_nat -> approximately 81.18 CFM
   float total_m3h = supply_flow_ + (total_loss_cfm_ / 0.5886f);
 
   if (total_m3h > 0.1f) {
-    float incoming_w = ((supply_flow_ * supply_w_) +
-                        ((total_loss_cfm_ / 0.5886f) * outdoor_w_)) /
-                       total_m3h;
+    float incoming_w = ((supply_flow_ * supply_w_) + ((total_loss_cfm_ / 0.5886f) * outdoor_w_)) / total_m3h;
 
     // mass conversion logic (g/kg): Max capacity must be kg/hr * 1000 to yield
     // grams delta_w is injection rate per hr divided by dynamic air mass
     // throughput
     float delta_w = (max_capacity_ * 1000.0f) / ((total_m3h * RHO));
 
-    max_achievable_dp_ =
-        MagnusTetens::target_dp_from_w(incoming_w + delta_w, P_ATM);
+    max_achievable_dp_ = MagnusTetens::target_dp_from_w(incoming_w + delta_w, P_ATM);
   } else {
     max_achievable_dp_ = -40.0f;
   }
@@ -555,7 +548,7 @@ bool HapsicController::read_sensors() {
 
 bool HapsicController::execute_interlocks() {
   if (fsm_state_ == INITIALIZING) {
-    return false; // Skip interlocks until we have valid sensors
+    return false;  // Skip interlocks until we have valid sensors
   }
 
   if (fsm_state_ == MAINTENANCE_LOCKOUT) {
@@ -641,120 +634,109 @@ void HapsicController::evaluate_fsm() {
   float room_deficit = target_room_dp_ - room_dp_;
 
   switch (fsm_state_) {
-  case INITIALIZING:
-    steam_voltage_ = 0.0f;
-    fan_voltage_ = 0.0f;
-    if (!std::isnan(duct_temp_) && !std::isnan(duct_rh_) &&
-        !std::isnan(room_dp_)) {
-      ESP_LOGI("hapsic",
-               "INITIALIZING → STANDBY (All critical sensors available)");
-      fsm_state_ = STANDBY;
-    } else {
-      // Periodic log to show what we are waiting on
-      if (tick_counter_ % 6 == 0) {
-        ESP_LOGI("hapsic",
-                 "INITIALIZING... waiting for sensors (Duct Temp: %.1f, Duct "
-                 "RH: %.1f, Room DP: %.1f)",
-                 duct_temp_, duct_rh_, room_dp_);
+    case INITIALIZING:
+      steam_voltage_ = 0.0f;
+      fan_voltage_ = 0.0f;
+      if (!std::isnan(duct_temp_) && !std::isnan(duct_rh_) && !std::isnan(room_dp_)) {
+        ESP_LOGI("hapsic", "INITIALIZING → STANDBY (All critical sensors available)");
+        fsm_state_ = STANDBY;
+      } else {
+        // Periodic log to show what we are waiting on
+        if (tick_counter_ % 6 == 0) {
+          ESP_LOGI("hapsic",
+                   "INITIALIZING... waiting for sensors (Duct Temp: %.1f, Duct "
+                   "RH: %.1f, Room DP: %.1f)",
+                   duct_temp_, duct_rh_, room_dp_);
+        }
       }
-    }
-    break;
+      break;
 
-  case STANDBY:
-    steam_voltage_ = 0.0f;
-    fan_voltage_ = 0.0f;
-
-    if (room_deficit > 0.555f) { // 1.0 F
-      ESP_LOGI("hapsic", "STANDBY → ACTIVE_CRUISE (deficit=%.1f)",
-               room_deficit);
-      fsm_state_ = ACTIVE_CRUISE;
-      reset_control_state();
-      fan_voltage_ = 5.0f;
-      tick_counter_ = ((tick_counter_ / 12) * 12);
-    }
-    break;
-
-  case ACTIVE_CRUISE:
-    fan_voltage_ = 5.0f;
-
-    if (room_deficit < 0.277f && turbo_lockout_ticks_ == 0) { // 0.5 F
-      ESP_LOGI("hapsic", "ACTIVE_CRUISE → STANDBY (deficit=%.1f < 0.28)",
-               room_deficit);
-      fsm_state_ = STANDBY;
+    case STANDBY:
       steam_voltage_ = 0.0f;
       fan_voltage_ = 0.0f;
-    } else if (steam_voltage_ > TURBO_STEAM_THRESH &&
-               duct_rh_ > TURBO_RH_THRESH &&
-               room_deficit > TURBO_DEFICIT_THRESH &&
-               turbo_lockout_ticks_ == 0) {
-      ESP_LOGI("hapsic", "ACTIVE_CRUISE → TURBO_PENDING");
-      fsm_state_ = TURBO_PENDING;
-      turbo_wait_ticks_ = 0;
-    } else if (room_deficit < -0.555f) { // -1.0 F
-      ESP_LOGI("hapsic", "ACTIVE_CRUISE → HYGIENIC_PURGE (surplus=%.1f)",
-               -room_deficit);
-      fsm_state_ = HYGIENIC_PURGE;
-      purge_ticks_ = 0;
+
+      if (room_deficit > 0.555f) {  // 1.0 F
+        ESP_LOGI("hapsic", "STANDBY → ACTIVE_CRUISE (deficit=%.1f)", room_deficit);
+        fsm_state_ = ACTIVE_CRUISE;
+        reset_control_state();
+        fan_voltage_ = 5.0f;
+        tick_counter_ = ((tick_counter_ / 12) * 12);
+      }
+      break;
+
+    case ACTIVE_CRUISE:
+      fan_voltage_ = 5.0f;
+
+      if (room_deficit < 0.277f && turbo_lockout_ticks_ == 0) {  // 0.5 F
+        ESP_LOGI("hapsic", "ACTIVE_CRUISE → STANDBY (deficit=%.1f < 0.28)", room_deficit);
+        fsm_state_ = STANDBY;
+        steam_voltage_ = 0.0f;
+        fan_voltage_ = 0.0f;
+      } else if (steam_voltage_ > TURBO_STEAM_THRESH && duct_rh_ > TURBO_RH_THRESH &&
+                 room_deficit > TURBO_DEFICIT_THRESH && turbo_lockout_ticks_ == 0) {
+        ESP_LOGI("hapsic", "ACTIVE_CRUISE → TURBO_PENDING");
+        fsm_state_ = TURBO_PENDING;
+        turbo_wait_ticks_ = 0;
+      } else if (room_deficit < -0.555f) {  // -1.0 F
+        ESP_LOGI("hapsic", "ACTIVE_CRUISE → HYGIENIC_PURGE (surplus=%.1f)", -room_deficit);
+        fsm_state_ = HYGIENIC_PURGE;
+        purge_ticks_ = 0;
+        steam_voltage_ = 0.0f;
+        fan_voltage_ = 9.0f;
+        integrator_a_ = 0.0f;
+        integrator_b_ = 0.0f;
+      }
+      break;
+
+    case TURBO_PENDING:
+      fan_voltage_ = 5.0f;
+
+      if ((supply_flow_ * 0.5886f) > TURBO_FLOW_CONFIRM) {
+        ESP_LOGI("hapsic", "TURBO_PENDING → ACTIVE_TURBO (flow=%.0f CFM)", supply_flow_ * 0.5886f);
+        fsm_state_ = ACTIVE_TURBO;
+        fan_voltage_ = 9.0f;
+      } else if (turbo_wait_ticks_ > TURBO_TIMEOUT_TICKS) {
+        ESP_LOGW("hapsic", "TURBO_PENDING timeout — lockout 30min");
+        fsm_state_ = ACTIVE_CRUISE;
+        turbo_lockout_ticks_ = TURBO_LOCKOUT_DURATION;
+        turbo_wait_ticks_ = 0;
+      }
+      break;
+
+    case ACTIVE_TURBO:
+      fan_voltage_ = 9.0f;
+
+      if (room_deficit < 0.555f) {  // 1.0 F
+        ESP_LOGI("hapsic", "ACTIVE_TURBO → ACTIVE_CRUISE (deficit=%.1f)", room_deficit);
+        fsm_state_ = ACTIVE_CRUISE;
+        fan_voltage_ = 5.0f;
+      }
+      break;
+
+    case HYGIENIC_PURGE:
       steam_voltage_ = 0.0f;
       fan_voltage_ = 9.0f;
-      integrator_a_ = 0.0f;
-      integrator_b_ = 0.0f;
-    }
-    break;
 
-  case TURBO_PENDING:
-    fan_voltage_ = 5.0f;
+      if (purge_ticks_ >= PURGE_MAX_TICKS) {
+        ESP_LOGI("hapsic", "HYGIENIC_PURGE → STANDBY (10 min elapsed)");
+        fsm_state_ = STANDBY;
+        fan_voltage_ = 0.0f;
+      } else if (room_deficit > 1.111f) {  // 2.0 F
+        ESP_LOGI("hapsic", "HYGIENIC_PURGE → STANDBY (over-drying, deficit=%.1f)", room_deficit);
+        fsm_state_ = STANDBY;
+        fan_voltage_ = 0.0f;
+      } else if (outdoor_dp_ > room_dp_) {
+        ESP_LOGW("hapsic", "HYGIENIC_PURGE → STANDBY (Swamp Trap: outdoor DP > room)");
+        fsm_state_ = STANDBY;
+        fan_voltage_ = 0.0f;
+      }
+      break;
 
-    if ((supply_flow_ * 0.5886f) > TURBO_FLOW_CONFIRM) {
-      ESP_LOGI("hapsic", "TURBO_PENDING → ACTIVE_TURBO (flow=%.0f CFM)",
-               supply_flow_ * 0.5886f);
-      fsm_state_ = ACTIVE_TURBO;
-      fan_voltage_ = 9.0f;
-    } else if (turbo_wait_ticks_ > TURBO_TIMEOUT_TICKS) {
-      ESP_LOGW("hapsic", "TURBO_PENDING timeout — lockout 30min");
-      fsm_state_ = ACTIVE_CRUISE;
-      turbo_lockout_ticks_ = TURBO_LOCKOUT_DURATION;
-      turbo_wait_ticks_ = 0;
-    }
-    break;
-
-  case ACTIVE_TURBO:
-    fan_voltage_ = 9.0f;
-
-    if (room_deficit < 0.555f) { // 1.0 F
-      ESP_LOGI("hapsic", "ACTIVE_TURBO → ACTIVE_CRUISE (deficit=%.1f)",
-               room_deficit);
-      fsm_state_ = ACTIVE_CRUISE;
-      fan_voltage_ = 5.0f;
-    }
-    break;
-
-  case HYGIENIC_PURGE:
-    steam_voltage_ = 0.0f;
-    fan_voltage_ = 9.0f;
-
-    if (purge_ticks_ >= PURGE_MAX_TICKS) {
-      ESP_LOGI("hapsic", "HYGIENIC_PURGE → STANDBY (10 min elapsed)");
-      fsm_state_ = STANDBY;
+    case FAULT:
+    case MAINTENANCE_LOCKOUT:
+      steam_voltage_ = 0.0f;
       fan_voltage_ = 0.0f;
-    } else if (room_deficit > 1.111f) { // 2.0 F
-      ESP_LOGI("hapsic", "HYGIENIC_PURGE → STANDBY (over-drying, deficit=%.1f)",
-               room_deficit);
-      fsm_state_ = STANDBY;
-      fan_voltage_ = 0.0f;
-    } else if (outdoor_dp_ > room_dp_) {
-      ESP_LOGW("hapsic",
-               "HYGIENIC_PURGE → STANDBY (Swamp Trap: outdoor DP > room)");
-      fsm_state_ = STANDBY;
-      fan_voltage_ = 0.0f;
-    }
-    break;
-
-  case FAULT:
-  case MAINTENANCE_LOCKOUT:
-    steam_voltage_ = 0.0f;
-    fan_voltage_ = 0.0f;
-    break;
+      break;
   }
 }
 
@@ -763,8 +745,7 @@ void HapsicController::evaluate_fsm() {
 // =============================================================================
 
 void HapsicController::execute_loop_a() {
-  if (fsm_state_ != ACTIVE_CRUISE && fsm_state_ != ACTIVE_TURBO &&
-      fsm_state_ != TURBO_PENDING) {
+  if (fsm_state_ != ACTIVE_CRUISE && fsm_state_ != ACTIVE_TURBO && fsm_state_ != TURBO_PENDING) {
     return;
   }
 
@@ -803,15 +784,12 @@ void HapsicController::execute_loop_a() {
     integrator_a_ += error;
   }
 
-  target_duct_dp_ =
-      std::max(min_clamp, std::min(max_clamp, target_room_dp_ + (KP_A * error) +
-                                                  (KI_A * integrator_a_)));
+  target_duct_dp_ = std::max(min_clamp, std::min(max_clamp, target_room_dp_ + (KP_A * error) + (KI_A * integrator_a_)));
 
   ESP_LOGD("hapsic",
            "LoopA: err=%.2f proposed=%.2f target_duct_dp=%.2f int=%.2f "
            "infeasible=%d",
-           error, proposed_val, target_duct_dp_, integrator_a_,
-           is_target_infeasible_);
+           error, proposed_val, target_duct_dp_, integrator_a_, is_target_infeasible_);
 }
 
 // =============================================================================
@@ -857,15 +835,14 @@ void HapsicController::execute_loop_b() {
 #ifdef DESK_MODE
   // Shadow Integrator (Mode C): Override integrator to track production
   uint32_t now_ms = millis();
-  if (shadow_mode_active_ && shadow_prod_voltage_ >= 0.0f &&
-      (now_ms - shadow_last_update_ms_) < 30000) {
+  if (shadow_mode_active_ && shadow_prod_voltage_ >= 0.0f && (now_ms - shadow_last_update_ms_) < 30000) {
     // Back-compute integrator so ideal_voltage matches production output
     if (KI_B > 0.001f) {
       integrator_b_ = (shadow_prod_voltage_ - v_ff_ - p_term) / KI_B;
     }
     ideal_voltage_ = std::min(9.5f, v_ff_ + p_term + (KI_B * integrator_b_));
-    ESP_LOGD("hapsic", "SHADOW: prod=%.1fV → integ=%.1f ideal=%.1fV",
-             shadow_prod_voltage_, integrator_b_, ideal_voltage_);
+    ESP_LOGD("hapsic", "SHADOW: prod=%.1fV → integ=%.1f ideal=%.1fV", shadow_prod_voltage_, integrator_b_,
+             ideal_voltage_);
   }
 #endif
 
@@ -902,7 +879,7 @@ void HapsicController::execute_loop_b() {
   // 5. Phase 3 (Glide-Path Modulation)
   else {
     if (steam_voltage_ == 0.0f && quantized_target >= 3.5f) {
-      next_voltage = 3.5f; // Min-Fire Bypass
+      next_voltage = 3.5f;  // Min-Fire Bypass
     } else {
       next_voltage = ideal_voltage_;
     }
@@ -963,7 +940,7 @@ void HapsicController::execute_loop_b() {
   // Universal Directional Freezing Rule
   if (next_voltage < ideal_voltage_ && error > 0) {
     if (next_voltage == 0.0f) {
-      integrator_b_ += error; // Escape min-fire
+      integrator_b_ += error;  // Escape min-fire
     } else {
       // Freeze
     }
@@ -975,9 +952,8 @@ void HapsicController::execute_loop_b() {
 
   steam_voltage_ = next_voltage;
 
-  ESP_LOGD("hapsic", "LoopB: ff=%.2f idl=%.2f next=%.2f nxt_fin=%.2f stasis=%d",
-           v_ff_, ideal_voltage_, quantized_target, next_voltage,
-           stasis_active_);
+  ESP_LOGD("hapsic", "LoopB: ff=%.2f idl=%.2f next=%.2f nxt_fin=%.2f stasis=%d", v_ff_, ideal_voltage_,
+           quantized_target, next_voltage, stasis_active_);
 }
 
 // =============================================================================
@@ -1012,8 +988,7 @@ void HapsicController::run_diagnostics() {
 
   net_flux_ = steam_mass_kg_hr_ - vent_loss_;
 
-  if (active_cruise_ticks_ > BOILING_MIN_TICKS &&
-      steam_voltage_ > BOILING_MIN_VOLTAGE) {
+  if (active_cruise_ticks_ > BOILING_MIN_TICKS && steam_voltage_ > BOILING_MIN_VOLTAGE) {
     boil_status_ = "BOILING";
 
     float theo_grams = steam_mass_kg_hr_ * (1000.0f / 60.0f);
@@ -1022,7 +997,7 @@ void HapsicController::run_diagnostics() {
       actual_grams = (duct_w_ - supply_w_) * dry_air_kg_hr / 60.0f;
     }
 
-    if (theo_grams > 1.5f) { // Approximately equivalent to 100 grains/min
+    if (theo_grams > 1.5f) {  // Approximately equivalent to 100 grains/min
       float chi_instant = actual_grams / theo_grams;
       chi_instant = std::max(0.0f, std::min(2.0f, chi_instant));
 
@@ -1041,12 +1016,10 @@ void HapsicController::run_diagnostics() {
     nvs_persist_counter_ = 0;
     HapsicPersist data;
     data.chi_ema = chi_ema_;
-    data.cached_target_rh =
-        cached_target_dp_; // Mapping DP into legacy struct slot
+    data.cached_target_rh = cached_target_dp_;  // Mapping DP into legacy struct slot
     data.magic = 0xABCD1234;
     pref_.save(&data);
-    ESP_LOGD("hapsic", "NVS persisted: CHI=%.4f, target_dp=%.1f C", chi_ema_,
-             cached_target_dp_);
+    ESP_LOGD("hapsic", "NVS persisted: CHI=%.4f, target_dp=%.1f C", chi_ema_, cached_target_dp_);
   }
 }
 
@@ -1159,17 +1132,12 @@ void HapsicController::publish_telemetry() {
            "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
            "\"health\":{\"chi_ratio\":%.4f,\"chi_ema\":%.4f}"
            "}",
-           state_name(fsm_state_), fault_reason_.c_str(), max_achievable_dp_,
-           is_target_infeasible_ ? "true" : "false", total_loss_cfm_,
-           target_room_dp_, room_dp_, loop_a_error, loop_a_p_term,
-           loop_a_i_term, integrator_a_, "false", target_duct_dp_,
-           target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term,
-           loop_b_i_term, integrator_b_, "false", ideal_voltage_,
-           boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
-           stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_,
-           active_limit_.c_str(), duct_derivative_, structure_velocity_,
-           supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_,
-           1.0f, chi_ema_);
+           state_name(fsm_state_), fault_reason_.c_str(), max_achievable_dp_, is_target_infeasible_ ? "true" : "false",
+           total_loss_cfm_, target_room_dp_, room_dp_, loop_a_error, loop_a_p_term, loop_a_i_term, integrator_a_,
+           "false", target_duct_dp_, target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term, loop_b_i_term,
+           integrator_b_, "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
+           stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), duct_derivative_,
+           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_, 1.0f, chi_ema_);
 
 #ifdef USE_MQTT
   if (mqtt::global_mqtt_client != nullptr) {
@@ -1187,21 +1155,16 @@ void HapsicController::publish_telemetry() {
 }
 
 void HapsicController::publish_terminal_heartbeat() {
-  float loop_a_p_term = (kp_a_number_ ? kp_a_number_->state : 2.0f) *
-                        (target_room_dp_ - room_dp_);
+  float loop_a_p_term = (kp_a_number_ ? kp_a_number_->state : 2.0f) * (target_room_dp_ - room_dp_);
   float loop_b_p_term = (kp_b_number_ ? kp_b_number_->state : 0.1f) *
-                        (std::abs(target_duct_dp_ - duct_dp_) < DEADBAND
-                             ? 0.0f
-                             : (target_duct_dp_ - duct_dp_));
+                        (std::abs(target_duct_dp_ - duct_dp_) < DEADBAND ? 0.0f : (target_duct_dp_ - duct_dp_));
   ESP_LOGI("hapsic",
            "[HEARTBEAT] %s [Boil:%s|Stasis:%ds] | R_DP: %.1fC (SP:%.1fC, "
            "IntA:%.1f) | D_DP: %.1fC (SP:%.1fC, IntB:%.1f) | dDP/dt: %.1fC/m | "
            "Lim: %s | Out: %.1fV [FF:%.1f|P:%.1f|I:%.1f]",
-           state_name(fsm_state_), boil_achieved_ ? "1" : "0",
-           stasis_timer_sec_, room_dp_, target_room_dp_, integrator_a_,
-           duct_dp_, target_duct_dp_, integrator_b_, duct_derivative_,
-           active_limit_.c_str(), steam_voltage_, v_ff_, loop_b_p_term,
-           (ki_b_number_ ? ki_b_number_->state : 0.02f) * integrator_b_);
+           state_name(fsm_state_), boil_achieved_ ? "1" : "0", stasis_timer_sec_, room_dp_, target_room_dp_,
+           integrator_a_, duct_dp_, target_duct_dp_, integrator_b_, duct_derivative_, active_limit_.c_str(),
+           steam_voltage_, v_ff_, loop_b_p_term, (ki_b_number_ ? ki_b_number_->state : 0.02f) * integrator_b_);
 }
 
 // =============================================================================
@@ -1245,16 +1208,14 @@ void HapsicController::update_display() {
   // Telemetry (Temps and DP)
   M5StamPLC.Display.printf("Duct: %.1f C | RH: %.1f%%", duct_temp_, duct_rh_);
   M5StamPLC.Display.setCursor(5, 60);
-  M5StamPLC.Display.printf("Room DP: %.1f C (Tgt: %.1f C)", room_dp_,
-                           target_room_dp_);
+  M5StamPLC.Display.printf("Room DP: %.1f C (Tgt: %.1f C)", room_dp_, target_room_dp_);
 
   M5StamPLC.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5StamPLC.Display.setCursor(5, 45);
   M5StamPLC.Display.printf("Duct: %.1f C | RH: %.1f%%", duct_temp_, duct_rh_);
 
   M5StamPLC.Display.setCursor(5, 60);
-  M5StamPLC.Display.printf("Stm: %.1f V | Fan: %.1f V", steam_voltage_,
-                           fan_voltage_);
+  M5StamPLC.Display.printf("Stm: %.1f V | Fan: %.1f V", steam_voltage_, fan_voltage_);
 
   // Diagnostics
   M5StamPLC.Display.setTextColor(TFT_DARKGRAY);
@@ -1267,7 +1228,7 @@ void HapsicController::update_display() {
 
 void HapsicController::update_buttons() {
 #ifdef USE_ESP32
-  M5StamPLC.update(); // Update physical button states
+  M5StamPLC.update();  // Update physical button states
 
   // BtnA: STOP ALL (Emergency Hard Stop)
   if (M5StamPLC.BtnA.pressedFor(1000)) {
@@ -1275,7 +1236,7 @@ void HapsicController::update_buttons() {
       ESP_LOGE("hapsic", "USER BUTTON E-STOP TRIGGERED!");
       fsm_state_ = FAULT;
       fault_reason_ = "USER_E_STOP";
-      fault_clear_ticks_ = 999999; // Requires manual reset
+      fault_clear_ticks_ = 999999;  // Requires manual reset
       force_safe_outputs();
       write_output();
     }
@@ -1292,5 +1253,5 @@ void HapsicController::update_buttons() {
 #endif
 }
 
-} // namespace hapsic
-} // namespace esphome
+}  // namespace hapsic
+}  // namespace esphome

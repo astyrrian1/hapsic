@@ -86,33 +86,39 @@ sensor:
     name: "Live Duct RH"
     id: live_duct_rh
     entity_id: sensor.hapsic_cleansed_supply_rh
+    internal: true
 
   - platform: homeassistant
     name: "Live Supply Flow"
     id: live_supply_flow
     entity_id: sensor.hapsic_supply_flow
+    internal: true
 
   # Pre-Steam / Extract 
   - platform: homeassistant
     name: "Live Pre-Steam Temp"
     id: live_extract_temp
     entity_id: sensor.hapsic_cleansed_inside_temp
+    internal: true
 
   - platform: homeassistant
     name: "Live Pre-Steam RH"
     id: live_extract_rh
     entity_id: sensor.hapsic_cleansed_inside_rh
+    internal: true
 
   # Room Average
   - platform: homeassistant
     name: "Live Avg Temp"
     id: live_avg_temp
     entity_id: sensor.hapsic_room_average_temp
+    internal: true
 
   - platform: homeassistant
     name: "Live Avg RH"
     id: live_avg_rh
     entity_id: sensor.hapsic_room_average_rh
+    internal: true
 
   # Outdoor
   - platform: homeassistant
