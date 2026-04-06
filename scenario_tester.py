@@ -1,30 +1,31 @@
-import sys
-import types
 import csv
+import sys
 import time
+import types
+
 
 class MockHass:
     def __init__(self):
         self.states = {}
-    
+
     def get_state(self, entity_id):
         return self.states.get(entity_id, None)
-        
+
     def call_service(self, service, **kwargs):
         pass
-        
+
     def log(self, msg, level="INFO"):
         pass
-        
+
     def turn_on(self, entity_id, **kwargs):
         pass
-        
+
     def turn_off(self, entity_id, **kwargs):
         pass
-        
+
     def run_every(self, callback, start, interval):
         pass
-        
+
     def listen_state(self, cb, entity_id):
         pass
 
@@ -50,18 +51,19 @@ hassapi.Hass = MockHass
 
 import hapsic
 
+
 def run_tests():
     controller = hapsic.HapsicController()
-    
+
     controller.states = {
         "input_number.humidifier_max_capacity": 2.7, # lbs/hr
         "input_number.target_dew_point": 50.0, # 10C
-        "sensor.hapsic_duct_temp": 68.0,
+        "sensor.hapsic_cleansed_post_steam_temp": 68.0,
         "sensor.hapsic_supply_flow": 400.0, # Zehnder CAN native
         "sensor.hapsic_extract_flow": 400.0,
         "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature": 59.0,
         "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity": 50.0,
-        
+
         # Mapped from CSV
         "sensor.hapsic_pre_steam_temp": 68.0,
         "sensor.hapsic_pre_steam_rh": 30.0,
@@ -69,16 +71,16 @@ def run_tests():
         "sensor.hapsic_room_average_rh": 30.0,
         "sensor.hapsic_cleansed_inside_temp": 68.0,
         "sensor.hapsic_cleansed_inside_rh": 30.0,
-        
+
         "input_number.hapsic_chi_ema": 1.0,
     }
-    
+
     controller.args = {
         "target_dew_point": "input_number.target_dew_point",
         "max_capacity": "input_number.humidifier_max_capacity",
         "manual_reset": "input_boolean.manual_reset",
-        "duct_temp": "sensor.hapsic_duct_temp",
-        "duct_rh": "sensor.hapsic_duct_rh",
+        "duct_temp": "sensor.hapsic_cleansed_post_steam_temp",
+        "duct_rh": "sensor.hapsic_cleansed_post_steam_rh",
         "supply_flow": "sensor.hapsic_supply_flow",
         "extract_flow": "sensor.hapsic_extract_flow",
         "bypass": "sensor.zehnder_comfoair_q_a4cb9c_bypass_state",
@@ -91,7 +93,7 @@ def run_tests():
         "steam_dac": "output.steam_dac",
         "fan_dac": "output.fan_dac"
     }
-    
+
     controller.initialize()
     controller.last_tick_ts = time.time() - 5.0
 
@@ -111,45 +113,44 @@ def run_tests():
             timeline[ts][row['entity_id']] = val
 
     sorted_times = sorted(list(timeline.keys()))
-    
+
     print("--- PYTHON SCENARIO STARTS ---")
-    
-    state_changes = []
+
     last_state = ""
-    
+
     # Mock time.time() to simulate perfectly advancing 5 seconds per tick
     mock_current_time = [time.time()]
-    original_time = time.time
-    
+
     def fake_time():
         return mock_current_time[0]
-        
+
     time.time = fake_time
-    
+
     for idx, ts in enumerate(sorted_times):
         updates = timeline[ts]
         for k, v in updates.items():
             if k == 'sim_extract_temp': controller.states['sensor.hapsic_pre_steam_temp'] = v
             if k == 'sim_extract_rh': controller.states['sensor.hapsic_pre_steam_rh'] = v
-            if k == 'sim_avg_temp': 
+            if k == 'sim_avg_temp':
                 controller.states['sensor.hapsic_room_average_temp'] = v
                 controller.states['sensor.hapsic_cleansed_inside_temp'] = v
-            if k == 'sim_avg_rh': 
+            if k == 'sim_avg_rh':
                 controller.states['sensor.hapsic_room_average_rh'] = v
                 controller.states['sensor.hapsic_cleansed_inside_rh'] = v
-            if k == 'sim_duct_temp': controller.states['sensor.hapsic_duct_temp'] = v
-            if k == 'sim_duct_rh': controller.states['sensor.hapsic_duct_rh'] = v
+            if k == 'sim_duct_temp': controller.states['sensor.hapsic_cleansed_post_steam_temp'] = v
+            if k == 'sim_duct_rh': controller.states['sensor.hapsic_cleansed_post_steam_rh'] = v
             if k == 'sim_supply_flow': controller.states['sensor.hapsic_supply_flow'] = v
-        
+
         # Advance mock time by exactly 5 seconds
         mock_current_time[0] += 5.0
-        
+
         controller.master_tick({})
-        
+
         current_state = controller.fsm_state
         if current_state != last_state:
             deficit = controller.states["input_number.target_dew_point"] - controller.room_dp
-            print(f"[{ts}] State Changed to {current_state} (Reason: {getattr(controller, 'fault_reason', 'None')}) | Deficit: {deficit:.2f}F")
+            reason = getattr(controller, 'fault_reason', 'None')
+            print(f"[{ts}] State Changed to {current_state} (Reason: {reason}) | Deficit: {deficit:.2f}F")
             last_state = current_state
 
 if __name__ == "__main__":

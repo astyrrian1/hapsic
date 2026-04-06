@@ -14,10 +14,11 @@ Run:
     python3 test_sensor_fallback.py
 """
 
-import sys
-import types
-import time
 import math
+import sys
+import time
+import types
+
 
 # -------------------------------------------------------------------------
 # Mock AppDaemon
@@ -89,8 +90,8 @@ def assert_close(actual, expected, tol, label):
 BASE_STATES = {
     "input_number.humidifier_max_capacity": 2.7,
     "input_number.target_dew_point": 50.0,
-    "sensor.hapsic_duct_temp": 68.0,
-    "sensor.hapsic_duct_rh": 35.0,
+    "sensor.hapsic_cleansed_post_steam_temp": 68.0,
+    "sensor.hapsic_cleansed_post_steam_rh": 35.0,
     "sensor.hapsic_supply_flow": 400.0,
     "sensor.hapsic_extract_flow": 400.0,
     "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature": 59.0,
@@ -109,8 +110,8 @@ ARGS = {
     "target_dew_point": "input_number.target_dew_point",
     "max_capacity": "input_number.humidifier_max_capacity",
     "manual_reset": "input_boolean.manual_reset",
-    "duct_temp": "sensor.hapsic_duct_temp",
-    "duct_rh": "sensor.hapsic_duct_rh",
+    "duct_temp": "sensor.hapsic_cleansed_post_steam_temp",
+    "duct_rh": "sensor.hapsic_cleansed_post_steam_rh",
     "supply_flow": "sensor.hapsic_supply_flow",
     "extract_flow": "sensor.hapsic_extract_flow",
     "bypass": "sensor.zehnder_comfoair_q_a4cb9c_bypass_state",
@@ -220,7 +221,6 @@ def test_supply_sensor_failure():
     """When supply (pre-steam) sensors fail, should use cache then FAULT."""
     c = make_controller()
     tick(c, 5)  # Build up valid cache
-    initial_supply_dp = c.supply_dp
 
     # Kill supply sensors
     c.states["sensor.hapsic_pre_steam_temp"] = None
@@ -233,30 +233,36 @@ def test_supply_sensor_failure():
 
 
 def test_duct_sensor_failure_faults():
-    """When duct sensors fail (no float), should trigger sensor failure."""
+    """When duct sensors fail (no float), should trigger sensor failure after cache expires."""
     c = make_controller()
     tick(c, 3)
 
     # Kill duct sensors entirely
-    c.states["sensor.hapsic_duct_temp"] = "unavailable"
-    c.states["sensor.hapsic_duct_rh"] = "unavailable"
-    tick(c, 10)
+    c.states["sensor.hapsic_cleansed_post_steam_temp"] = "unavailable"
+    c.states["sensor.hapsic_cleansed_post_steam_rh"] = "unavailable"
 
-    # Should fault or park to safety
+    # Advance past 30-minute cache window (1800s) then tick
+    c._mock_time[0] += 1900
+    tick(c, 5)
+
+    # Should fault or park to safety after cache expires
     assert_true(c.fsm_state == "FAULT" or c.steam_voltage == 0.0,
                 f"duct_failure_faults (state={c.fsm_state})")
 
 
 def test_outdoor_sensor_failure():
-    """When outdoor sensors fail, should fault (no cache for outdoor)."""
+    """When outdoor sensors fail, should fault after cache expires."""
     c = make_controller()
     tick(c, 3)
 
     c.states["sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature"] = None
     c.states["sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity"] = None
+
+    # Advance past 30-minute cache window (1800s) then tick
+    c._mock_time[0] += 1900
     tick(c, 5)
 
-    # Should fault — outdoor has no explicit cache in read_and_validate_sensors
+    # Should fault after cache expires
     assert_true(c.fsm_state == "FAULT" or c.steam_voltage == 0.0,
                 f"outdoor_failure_faults (state={c.fsm_state})")
 
@@ -300,5 +306,5 @@ if __name__ == "__main__":
         print(f"  ❌ {fail_count} FAILURES")
         sys.exit(1)
     else:
-        print(f"  ✅ ALL TESTS PASSED")
+        print("  ✅ ALL TESTS PASSED")
         sys.exit(0)

@@ -21,8 +21,9 @@ Run:
 """
 
 import sys
-import types
 import time
+import types
+
 
 # -------------------------------------------------------------------------
 # Mock AppDaemon
@@ -62,7 +63,6 @@ sys.modules['appdaemon.plugins.hass.hassapi'] = hassapi
 hassapi.Hass = MockHass
 
 import hapsic
-
 
 # -------------------------------------------------------------------------
 # Test Framework
@@ -104,8 +104,8 @@ def make_controller(state_overrides=None):
     controller.states = {
         "input_number.humidifier_max_capacity": 2.7,
         "input_number.target_dew_point": 50.0,  # 10°C equivalent in °F
-        "sensor.hapsic_duct_temp": 68.0,
-        "sensor.hapsic_duct_rh": 35.0,
+        "sensor.hapsic_cleansed_post_steam_temp": 68.0,
+        "sensor.hapsic_cleansed_post_steam_rh": 35.0,
         "sensor.hapsic_supply_flow": 400.0,
         "sensor.hapsic_extract_flow": 400.0,
         "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature": 59.0,
@@ -125,8 +125,8 @@ def make_controller(state_overrides=None):
         "target_dew_point": "input_number.target_dew_point",
         "max_capacity": "input_number.humidifier_max_capacity",
         "manual_reset": "input_boolean.manual_reset",
-        "duct_temp": "sensor.hapsic_duct_temp",
-        "duct_rh": "sensor.hapsic_duct_rh",
+        "duct_temp": "sensor.hapsic_cleansed_post_steam_temp",
+        "duct_rh": "sensor.hapsic_cleansed_post_steam_rh",
         "supply_flow": "sensor.hapsic_supply_flow",
         "extract_flow": "sensor.hapsic_extract_flow",
         "bypass": "sensor.zehnder_comfoair_q_a4cb9c_bypass_state",
@@ -220,7 +220,6 @@ def test_purge_timer_expiry():
     c.states["sensor.hapsic_cleansed_inside_rh"] = 65.0
     tick(c, 5)
     # If we entered purge, wait for timer. If standby, that's also valid.
-    initial_state = c.fsm_state
     tick(c, 130)  # Wait for timer
     # After timer, should be in STANDBY
     final_state = c.fsm_state
@@ -264,7 +263,7 @@ def test_cold_start_stasis():
         pass_count += 1
     else:
         fail_count += 1
-        results.append(f"  ❌ cold_start_stasis: no stasis detected")
+        results.append("  ❌ cold_start_stasis: no stasis detected")
 
 
 def test_voltage_zero_in_standby():
@@ -299,7 +298,6 @@ def test_anti_windup():
 
     # Now set a normal target
     c.states["input_number.target_dew_point"] = 50.0
-    pre_voltage = c.steam_voltage
     tick(c, 5)
     post_voltage = c.steam_voltage
     # Voltage should not spike dramatically (anti-windup working)
@@ -313,7 +311,7 @@ def test_ceiling_limiter():
     tick(c, 10)  # Enter cruise, build voltage
 
     # Set very high duct RH to trigger ceiling
-    c.states["sensor.hapsic_duct_rh"] = 90.0
+    c.states["sensor.hapsic_cleansed_post_steam_rh"] = 90.0
     tick(c, 20)
 
     # Voltage should be reduced or capped
@@ -338,13 +336,13 @@ def test_fault_recovery():
     tick(c, 5)
 
     # Trigger fault by killing sensors
-    c.states["sensor.hapsic_duct_temp"] = None
-    c.states["sensor.hapsic_duct_rh"] = None
+    c.states["sensor.hapsic_cleansed_post_steam_temp"] = None
+    c.states["sensor.hapsic_cleansed_post_steam_rh"] = None
     tick(c, 10)
 
     # Restore sensors
-    c.states["sensor.hapsic_duct_temp"] = 68.0
-    c.states["sensor.hapsic_duct_rh"] = 35.0
+    c.states["sensor.hapsic_cleansed_post_steam_temp"] = 68.0
+    c.states["sensor.hapsic_cleansed_post_steam_rh"] = 35.0
     tick(c, 30)
 
     # Should recover to a non-fault state (STANDBY or ACTIVE_CRUISE)
@@ -379,5 +377,5 @@ if __name__ == "__main__":
         print(f"  ❌ {fail_count} FAILURES")
         sys.exit(1)
     else:
-        print(f"  ✅ ALL TESTS PASSED")
+        print("  ✅ ALL TESTS PASSED")
         sys.exit(0)
