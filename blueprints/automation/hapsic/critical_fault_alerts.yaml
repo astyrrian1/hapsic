@@ -1,0 +1,66 @@
+blueprint:
+  name: HAPSIC Critical Fault Alerts
+  description: "Triggers on FAULT state with dynamic messages based on fault reason."
+  domain: automation
+  input:
+    fsm_state_sensor:
+      name: HAPSIC FSM State Sensor
+      description: The sensor tracking HAPSIC FSM state
+      selector:
+        entity:
+          domain: sensor
+      default: sensor.hapsic_fsm_state
+    fault_reason_sensor:
+      name: HAPSIC Fault Reason Sensor
+      description: The sensor tracking the reason for the FAULT state
+      selector:
+        entity:
+          domain: sensor
+      default: sensor.hapsic_fault_reason
+    notify_service:
+      name: Notification Service
+      description: The notify service to call (e.g. notify.mobile_app_phone). Defaults to persistent_notification.
+      selector:
+        text: {}
+      default: persistent_notification
+
+variables:
+  reason_sensor: !input fault_reason_sensor
+  notify_svc: !input notify_service
+  reason: "{{ states(reason_sensor) }}"
+  message: >-
+    {% if reason == 'Zero Flow' %}
+      ⚠️ Airflow stopped. Humidifier parked. Check ventilation system power.
+    {% elif reason == 'Sensor Failure' %}
+      🌡️ Sensor offline. Humidifier parked. Check sensor connections.
+    {% elif reason == 'CLOGGED FILTER' %}
+      🔴 Sustained supply/exhaust imbalance detected. Humidifier locked. Replace ERV filters and restart controller.
+    {% elif reason == 'Defrost Active' %}
+      ❄️ ERV defrost cycle. Humidifier temporarily parked. Will auto-resume.
+    {% elif reason == 'Economizer Bypass' %}
+      🌀 ERV bypass open. Humidifier parked to prevent waste.
+    {% else %}
+      ⚠️ HAPSIC entered FAULT state. Reason: {{ reason }}
+    {% endif %}
+
+trigger:
+  - platform: state
+    entity_id: !input fsm_state_sensor
+    to: "FAULT"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_svc == 'persistent_notification' }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "HAPSIC Fault Alert"
+              message: "{{ message }}"
+    default:
+      - service: "{{ notify_svc }}"
+        data:
+          title: "HAPSIC Fault Alert"
+          message: "{{ message }}"
+        continue_on_error: true

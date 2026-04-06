@@ -1,0 +1,55 @@
+blueprint:
+  name: Zehnder ERV Filter Countdown
+  description: "Triggers on ERV filter change countdown reaching thresholds (e.g. 7 days, 0 days)."
+  domain: automation
+  input:
+    filter_days_sensor:
+      name: Filter Days Remaining Sensor
+      description: The sensor tracking remaining days until ERV filter change
+      selector:
+        entity:
+          domain: sensor
+    notify_service:
+      name: Notification Service
+      description: The notify service to call (e.g. notify.mobile_app_phone). Defaults to persistent_notification.
+      selector:
+        text: {}
+      default: persistent_notification
+
+variables:
+  days_sensor: !input filter_days_sensor
+  notify_svc: !input notify_service
+  days: "{{ states(days_sensor) | int(default=999) }}"
+  message: >-
+    {% if days <= 0 %}
+      🚨 Zehnder ERV filter has expired ({{ days }} days overdue). Change filter immediately to prevent HAPSIC lockout.
+    {% elif days <= 7 %}
+      ⚠️ Zehnder ERV filter needs changing in {{ days }} days. Please order replacements.
+    {% else %}
+      Zehnder ERV filter due in {{ days }} days.
+    {% endif %}
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input filter_days_sensor
+    below: 8
+  - platform: numeric_state
+    entity_id: !input filter_days_sensor
+    below: 1
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_svc == 'persistent_notification' }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "ERV Filter Maintenance"
+              message: "{{ message }}"
+    default:
+      - service: "{{ notify_svc }}"
+        data:
+          title: "ERV Filter Maintenance"
+          message: "{{ message }}"
+        continue_on_error: true
