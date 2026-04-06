@@ -39,6 +39,21 @@ HAPSIC ships with a **Mission Control** dashboard for monitoring the physics eng
 3. Paste the contents of [`dashboards/mission-control.yaml`](dashboards/mission-control.yaml)
 4. Save
 
+## Notification Blueprints
+
+HAPSIC includes three Blueprint automations for proactive system monitoring. Each can be imported with one click:
+
+| Blueprint | Purpose |
+|-----------|---------|
+| **[Critical Fault Alerts](blueprints/automation/hapsic/hapsic_critical_alerts.yaml)** | Immediate notification on fault entry (zero flow, sensor failure, clogged filter, defrost, bypass, watchdog) |
+| **[Maintenance & Awareness](blueprints/automation/hapsic/hapsic_maintenance_alerts.yaml)** | Non-urgent alerts: target infeasibility, fault recovery, canister health (CHI EMA) |
+| **[Daily Status Digest](blueprints/automation/hapsic/hapsic_daily_digest.yaml)** | Once-daily summary of system health, energy consumption, and weather conditions |
+
+**To install a blueprint:**
+1. In Home Assistant, go to **Settings → Automations & Scenes → Blueprints**
+2. Click **Import Blueprint** and paste the raw GitHub URL of the blueprint file
+3. Create an automation from the blueprint and configure your notification target
+
 ## Architecture & Components
 
 HAPSIC is uniquely designed with a strict **Local-First, Edge-Computed** philosophy. The core intelligence lives directly on the microcontroller, ensuring physics boundaries are maintained safely, regardless of WiFi connectivity or Home Assistant crashes. 

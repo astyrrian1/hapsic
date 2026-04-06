@@ -3,6 +3,15 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.3.0] — 2026-04-06
+
+### Added
+- **Notification Blueprints**: Three HA Blueprint automations for HAPSIC monitoring, installable with one click:
+  - **Critical Fault Alerts** — Immediate notification when HAPSIC enters a fault state (zero flow, sensor failure, clogged filter, defrost, bypass, or watchdog timeout). Includes configurable cooldown to prevent notification spam.
+  - **Maintenance & Awareness** — Non-urgent alerts for target dew point infeasibility, fault recovery, and canister health degradation (CHI EMA). Each alert type independently toggleable.
+  - **Daily Status Digest** — Once-daily summary of system health at a user-chosen time, including house conditions, steam output, estimated energy consumption (Aprilaire 801 specs), canister health, and weather forecast.
+- All blueprints support `persistent_notification`, `notify.notify`, or any custom notification service (e.g., `notify.mobile_app_pixel`).
+
 ## [v2.2.5] — 2026-04-06
 
 ### Fixed
