@@ -49,7 +49,7 @@ sys.modules['appdaemon.plugins.hass.hassapi'] = hassapi
 
 hassapi.Hass = MockHass
 
-import hapsic
+from apps.hapsic_controller import hapsic_controller as hapsic
 
 
 def run_tests():

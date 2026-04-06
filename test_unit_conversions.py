@@ -39,7 +39,7 @@ def lbs_to_kg(lbs):
     return lbs * 0.453592
 
 def m3h_to_cfm(m3h):
-    """m³/h → CFM (matches hapsic.py constant: * 0.5886)"""
+    """m³/h → CFM (matches apps/hapsic_controller/hapsic_controller.py constant: * 0.5886)"""
     return m3h * 0.5886
 
 def lbs_ft3_to_kg_m3(rho_imperial):
@@ -51,7 +51,7 @@ def lbs_ft3_to_kg_m3(rho_imperial):
 # Platform constants (from source files)
 # -------------------------------------------------------------------------
 
-# Python (hapsic.py)
+# Python (apps/hapsic_controller/hapsic_controller.py)
 PY_P_ATM = 88.6          # kPa
 PY_RHO = 0.065           # lbs/ft³
 PY_MAX_DUCT_DP = 60.0    # °F

@@ -48,7 +48,7 @@ hassapi.Hass = MockHass
 import sys
 import time
 
-import hapsic
+from apps.hapsic_controller import hapsic_controller as hapsic
 
 
 def run_comparison():

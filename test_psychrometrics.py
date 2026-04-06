@@ -20,7 +20,7 @@ import math
 import sys
 
 # -------------------------------------------------------------------------
-# Reference implementations (extracted from hapsic.py source of truth)
+# Reference implementations (extracted from apps/hapsic_controller/hapsic_controller.py source of truth)
 # -------------------------------------------------------------------------
 
 P_ATM = 88.6  # kPa (Amarillo altitude)
