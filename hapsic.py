@@ -197,7 +197,11 @@ class HapsicController(hass.Hass):
             h_rh = self.get_state("sensor.hapsic_room_average_rh")
             e_t = self.get_state("sensor.hapsic_cleansed_inside_temp")
             e_rh = self.get_state("sensor.hapsic_cleansed_inside_rh")
-            self.log(f"HAL DEBUG: room_avg_t={h_t!r}, room_avg_rh={h_rh!r}, extract_t={e_t!r}, extract_rh={e_rh!r}", level="DEBUG")
+            self.log(
+                f"HAL DEBUG: room_avg_t={h_t!r}, room_avg_rh={h_rh!r}, "
+                f"extract_t={e_t!r}, extract_rh={e_rh!r}",
+                level="DEBUG",
+            )
 
             effective_room_t, effective_room_rh = safe_parse(h_t, h_rh)
             if effective_room_t is None:
@@ -212,9 +216,19 @@ class HapsicController(hass.Hass):
             else:
                 cache_age = now_time - self.last_valid_room_dp_time
                 if self.last_valid_room_dp_time > 0 and cache_age < 1800:
-                    self.log(f"HAL ALERT: Inside sensors offline (h_t={h_t!r}, h_rh={h_rh!r}, e_t={e_t!r}, e_rh={e_rh!r}). Using cached DP {self.room_dp:.1f}F", level="WARNING")
+                    self.log(
+                        f"HAL ALERT: Inside sensors offline (h_t={h_t!r}, "
+                        f"h_rh={h_rh!r}, e_t={e_t!r}, e_rh={e_rh!r}). "
+                        f"Using cached DP {self.room_dp:.1f}F",
+                        level="WARNING",
+                    )
                 else:
-                    self.log(f"HAL CRITICAL: Inside sensors failed (h_t={h_t!r}, h_rh={h_rh!r}, e_t={e_t!r}, e_rh={e_rh!r}) and cache expired (>30m).", level="ERROR")
+                    self.log(
+                        f"HAL CRITICAL: Inside sensors failed (h_t={h_t!r}, "
+                        f"h_rh={h_rh!r}, e_t={e_t!r}, e_rh={e_rh!r}) "
+                        f"and cache expired (>30m).",
+                        level="ERROR",
+                    )
                     return False
 
             # --- Config Inputs (with safe fallback) ---
@@ -222,7 +236,12 @@ class HapsicController(hass.Hass):
             raw_max_cap = self.get_state("input_number.humidifier_max_capacity")
             cfg_target, _ = safe_parse(raw_target_dp, raw_max_cap)
             if cfg_target is None:
-                self.log(f"HAL ALERT: Config inputs unavailable (target={raw_target_dp!r}, cap={raw_max_cap!r}). Using cached.", level="WARNING")
+                self.log(
+                    f"HAL ALERT: Config inputs unavailable "
+                    f"(target={raw_target_dp!r}, cap={raw_max_cap!r}). "
+                    f"Using cached.",
+                    level="WARNING",
+                )
             else:
                 self.target_room_dp = float(raw_target_dp)
                 self.MAX_CAPACITY = float(raw_max_cap)
@@ -238,9 +257,19 @@ class HapsicController(hass.Hass):
             else:
                 cache_age = now_time - self.last_valid_outdoor_time
                 if self.last_valid_outdoor_time > 0 and cache_age < 1800:
-                    self.log(f"HAL ALERT: Outdoor sensors offline (t={raw_out_t!r}, rh={raw_out_rh!r}). Using cached DP {self.outdoor_dp:.1f}F", level="WARNING")
+                    self.log(
+                        f"HAL ALERT: Outdoor sensors offline "
+                        f"(t={raw_out_t!r}, rh={raw_out_rh!r}). "
+                        f"Using cached DP {self.outdoor_dp:.1f}F",
+                        level="WARNING",
+                    )
                 else:
-                    self.log(f"HAL CRITICAL: Outdoor sensors failed (t={raw_out_t!r}, rh={raw_out_rh!r}) and cache expired.", level="ERROR")
+                    self.log(
+                        f"HAL CRITICAL: Outdoor sensors failed "
+                        f"(t={raw_out_t!r}, rh={raw_out_rh!r}) "
+                        f"and cache expired.",
+                        level="ERROR",
+                    )
                     return False
 
             # --- Supply / Pre-Steam (CAN) ---
@@ -257,9 +286,18 @@ class HapsicController(hass.Hass):
             else:
                 cache_age = now_time - self.last_valid_supply_w_time
                 if self.last_valid_supply_w_time > 0 and cache_age < 1800:
-                    self.log(f"HAL ALERT: Supply sensors offline (t={s_t!r}, rh={s_rh!r}). Using cached W {self.supply_w:.1f}", level="WARNING")
+                    self.log(
+                        f"HAL ALERT: Supply sensors offline "
+                        f"(t={s_t!r}, rh={s_rh!r}). "
+                        f"Using cached W {self.supply_w:.1f}",
+                        level="WARNING",
+                    )
                 else:
-                    self.log(f"HAL CRITICAL: Supply sensors failed (t={s_t!r}, rh={s_rh!r}) and cache expired.", level="ERROR")
+                    self.log(
+                        f"HAL CRITICAL: Supply sensors failed "
+                        f"(t={s_t!r}, rh={s_rh!r}) and cache expired.",
+                        level="ERROR",
+                    )
                     return False
 
             # --- Post-Steam (Duct) with EMA Filter (with safe fallback + 30m cache) ---
@@ -285,9 +323,19 @@ class HapsicController(hass.Hass):
             else:
                 cache_age = now_time - self.last_valid_duct_time
                 if self.last_valid_duct_time > 0 and cache_age < 1800:
-                    self.log(f"HAL ALERT: Duct sensors offline (t={raw_duct_t_str!r}, rh={raw_duct_rh_str!r}). Using cached DP {self.duct_dp:.1f}F", level="WARNING")
+                    self.log(
+                        f"HAL ALERT: Duct sensors offline "
+                        f"(t={raw_duct_t_str!r}, rh={raw_duct_rh_str!r}). "
+                        f"Using cached DP {self.duct_dp:.1f}F",
+                        level="WARNING",
+                    )
                 else:
-                    self.log(f"HAL CRITICAL: Duct sensors failed (t={raw_duct_t_str!r}, rh={raw_duct_rh_str!r}) and cache expired.", level="ERROR")
+                    self.log(
+                        f"HAL CRITICAL: Duct sensors failed "
+                        f"(t={raw_duct_t_str!r}, rh={raw_duct_rh_str!r}) "
+                        f"and cache expired.",
+                        level="ERROR",
+                    )
                     return False
 
             # --- Flow (with safe fallback + 30m cache) ---
@@ -306,9 +354,19 @@ class HapsicController(hass.Hass):
             else:
                 cache_age = now_time - self.last_valid_flow_time
                 if self.last_valid_flow_time > 0 and cache_age < 1800:
-                    self.log(f"HAL ALERT: Flow sensors offline (sf={raw_supply_flow!r}, ef={raw_exhaust_flow!r}, bp={raw_bypass!r}). Using cached.", level="WARNING")
+                    self.log(
+                        f"HAL ALERT: Flow sensors offline "
+                        f"(sf={raw_supply_flow!r}, ef={raw_exhaust_flow!r}, "
+                        f"bp={raw_bypass!r}). Using cached.",
+                        level="WARNING",
+                    )
                 else:
-                    self.log(f"HAL CRITICAL: Flow sensors failed (sf={raw_supply_flow!r}, ef={raw_exhaust_flow!r}, bp={raw_bypass!r}) and cache expired.", level="ERROR")
+                    self.log(
+                        f"HAL CRITICAL: Flow sensors failed "
+                        f"(sf={raw_supply_flow!r}, ef={raw_exhaust_flow!r}, "
+                        f"bp={raw_bypass!r}) and cache expired.",
+                        level="ERROR",
+                    )
                     return False
 
             # --- 2.4 Mass Balance & Feasibility Horizon Engine ---
@@ -335,7 +393,12 @@ class HapsicController(hass.Hass):
         except (ValueError, TypeError) as e:
             tb_lines = traceback.format_exc().splitlines()
             relevant_tb = " | ".join(tb_lines[-4:])
-            self.log(f"HAL ALERT: Critical Sensor Read Failed. Type: {type(e).__name__}, Error: {e} | Traceback: {relevant_tb}", level="ERROR")
+            self.log(
+                f"HAL ALERT: Critical Sensor Read Failed. "
+                f"Type: {type(e).__name__}, Error: {e} "
+                f"| Traceback: {relevant_tb}",
+                level="ERROR",
+            )
             return False
 
     # =========================================================================
@@ -362,7 +425,11 @@ class HapsicController(hass.Hass):
         if not valid_sensors:
             startup_age = now - self.startup_ts
             if startup_age < 90.0:
-                self.log(f"HAL: Sensors not ready ({startup_age:.0f}s since startup). Waiting in STANDBY.", level="WARNING")
+                self.log(
+                    f"HAL: Sensors not ready ({startup_age:.0f}s "
+                    f"since startup). Waiting in STANDBY.",
+                    level="WARNING",
+                )
                 self.publish_telemetry()
                 return
             self.trigger_fault("Sensor Failure")
