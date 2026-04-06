@@ -8,7 +8,7 @@ csv_data = []
 def add_tick(t_offset_sec, extract_temp, extract_rh, duct_temp, duct_rh, supply_flow):
     dt = start_time + timedelta(seconds=t_offset_sec)
     time_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    
+
     csv_data.append(["sim_extract_temp", extract_temp, time_str])
     csv_data.append(["sim_extract_rh", extract_rh, time_str])
     csv_data.append(["sim_avg_temp", extract_temp, time_str])
@@ -20,7 +20,7 @@ def add_tick(t_offset_sec, extract_temp, extract_rh, duct_temp, duct_rh, supply_
 def add_tick_detailed(t_offset_sec, avg_temp, avg_rh, extract_temp, extract_rh, duct_temp, duct_rh, supply_flow):
     dt = start_time + timedelta(seconds=t_offset_sec)
     time_str = dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    
+
     csv_data.append(["sim_extract_temp", extract_temp, time_str])
     csv_data.append(["sim_extract_rh", extract_rh, time_str])
     csv_data.append(["sim_avg_temp", avg_temp, time_str])
@@ -30,7 +30,7 @@ def add_tick_detailed(t_offset_sec, avg_temp, avg_rh, extract_temp, extract_rh, 
     csv_data.append(["sim_supply_flow", supply_flow, time_str])
 
 # Scenario 1: ACTIVE_CRUISE (Deficit > 0.55C)
-# Target DP is 10.0C. We need room DP < 9.45C. 
+# Target DP is 10.0C. We need room DP < 9.45C.
 # Room temp = 20C, RH = 30% -> Room DP = 1.9C -> Deficit is 8.1C. (Will enter ACTIVE_CRUISE)
 tick = 0
 for i in range(20):
@@ -39,14 +39,14 @@ for i in range(20):
 
 # Scenario 2: TURBO_PENDING -> ACTIVE_TURBO
 # Keep Deficit high. But make pre_steam_temp (extract_temp) very low so target RH > 82%.
-# Extract Temp = 12C, RH = 30%. Target DP is 10C. Deficit is high. 
-# The engine will demand target_duct_dp up to 15.56C. 
+# Extract Temp = 12C, RH = 30%. Target DP is 10C. Deficit is high.
+# The engine will demand target_duct_dp up to 15.56C.
 # Relative humidity of 15.56C DP at 12C Temp is basically > 100%, exceeding 82%.
 # Will trigger TURBO_PENDING. Keep flow > 340 so it transitions to ACTIVE_TURBO.
 for i in range(150): # Give it time to wind up steam to > 9.5V
     add_tick(tick, 12.0, 30.0, 12.0, 30.0, 400.0)
     tick += 5
-    
+
 # Scenario 3: ACTIVE_CRUISE -> STANDBY
 # Drop Target DP deficit to 0 by making room DP = 10.0C.
 # Room temp = 20C, RH = 52.8% -> DP approx 10.0C. Deficit = 0.0.

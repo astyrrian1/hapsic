@@ -1,5 +1,6 @@
-import serial
 import time
+
+import serial
 
 try:
     s = serial.Serial('/dev/cu.usbmodem101', 115200, timeout=1.0)

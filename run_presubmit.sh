@@ -24,41 +24,54 @@ echo "========================================="
 echo ""
 echo "=== 1. Python Lint (ruff) ==="
 if command -v ruff &> /dev/null; then
-  ruff check hapsic.py test_harness.py test_component_parity.py test_shadow_integrator.py scenario_tester.py run_compare.py || true
-  echo "✓ Ruff lint completed."
+  ruff check .
+  echo "✓ Python lint clean."
 else
-  echo "⚠ ruff not installed, skipping Python lint."
+  echo "⚠ ruff not installed. Install: brew install ruff"
+  exit 1
 fi
 
-# 2. ESPHome YAML validation
+# 2. Lint: C++ (clang-format)
+CLANG_FMT="/opt/homebrew/opt/llvm/bin/clang-format"
 echo ""
-echo "=== 2. ESPHome Configuration Validation ==="
+echo "=== 2. C++ Format Check (clang-format) ==="
+if [[ -x "$CLANG_FMT" ]]; then
+  $CLANG_FMT --dry-run --Werror components/hapsic/*.cpp components/hapsic/*.h
+  echo "✓ C++ formatting clean."
+else
+  echo "⚠ clang-format not found. Install: brew install llvm"
+  exit 1
+fi
+
+# 3. ESPHome YAML validation
+echo ""
+echo "=== 3. ESPHome Configuration Validation ==="
 esphome config stamplc.yaml > /dev/null
 echo "✓ Production YAML valid."
 esphome config stamplc_desk.yaml > /dev/null
 echo "✓ Desk YAML valid."
 
-# 3. ESPHome desk compilation
+# 4. ESPHome desk compilation
 echo ""
-echo "=== 3. ESPHome Desk Firmware Compilation ==="
+echo "=== 4. ESPHome Desk Firmware Compilation ==="
 esphome compile stamplc_desk.yaml
 echo "✓ Desk firmware compiled successfully."
 
-# 4. Full offline CI suite
+# 5. Full offline CI suite
 echo ""
-echo "=== 4. Offline CI Test Suite ==="
+echo "=== 5. Offline CI Test Suite ==="
 bash run_all_tests.sh
 echo "✓ Offline CI tests passed."
 
-# 5. Live MQTT tests (optional)
+# 6. Live MQTT tests (optional)
 if $LIVE_MODE; then
   echo ""
-  echo "=== 5. Live Mode D: Component Parity ==="
+  echo "=== 6. Live Mode D: Component Parity ==="
   python3 test_component_parity.py
   echo "✓ Component parity tests passed."
 
   echo ""
-  echo "=== 6. Live Mode C: Shadow Integrator ==="
+  echo "=== 7. Live Mode C: Shadow Integrator ==="
   python3 test_shadow_integrator.py
   echo "✓ Shadow integrator tests passed."
 fi

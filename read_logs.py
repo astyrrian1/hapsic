@@ -1,5 +1,6 @@
-import serial
 import time
+
+import serial
 
 port = '/dev/cu.usbmodem101'
 baud = 115200

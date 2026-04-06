@@ -1,8 +1,10 @@
-import time
 import json
 import os
-import yaml
+import time
+
 import paho.mqtt.client as mqtt
+import yaml
+
 
 # Load MQTT configuration from secrets.yaml
 def load_secrets():
@@ -31,7 +33,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 def on_message(client, userdata, msg):
     global last_prod, last_desk
-    
+
     try:
         payload = json.loads(msg.payload.decode('utf-8'))
     except json.JSONDecodeError:
@@ -67,13 +69,16 @@ def format_desk_line(d):
         out = d.get('io', {}).get('volts_out', 0.0)
         vff = d.get('loop_b', {}).get('v_ff', 0.0)
         ideal = d.get('loop_b', {}).get('ideal_voltage', 0.0)
-        
+
         # Add conversions for apples to apples math verification visually
         r_f = (room_c * 9/5) + 32
         sp_f = (sp_c * 9/5) + 32
         max_f = (max_c * 9/5) + 32
-        
-        return f"{fsm:^14} | R:{r_f:4.1f}F | S:{sp_f:4.1f}F | D:{duct_c:4.1f}C | Max:{max_f:4.1f}F | O:{out:4.1f}V (Id:{ideal:3.1f} FF:{vff:3.1f})"
+
+        return (
+            f"{fsm:^14} | R:{r_f:4.1f}F | S:{sp_f:4.1f}F | D:{duct_c:4.1f}C"
+            f" | Max:{max_f:4.1f}F | O:{out:4.1f}V (Id:{ideal:3.1f} FF:{vff:3.1f})"
+        )
     except Exception:
         return "Parsing Error"
 
@@ -81,7 +86,7 @@ def compare_and_print(prod_data, desk_data):
     str_prod = format_prod_line(prod_data)
     str_desk = format_desk_line(desk_data)
     print(f"{str_prod:<58} || {str_desk:<58}")
-    
+
     alerts = []
     try:
         # FSM State Comparison
@@ -89,7 +94,7 @@ def compare_and_print(prod_data, desk_data):
         fsm_d = desk_data.get('fsm', {}).get('state', 'N/A')
         if fsm_p != fsm_d and fsm_p != 'N/A' and fsm_d != 'N/A':
             alerts.append(f"  [!] STATE DISCREPANCY: Prod > {fsm_p} | Desk > {fsm_d}")
-            
+
         # Steam output comparison (should be exactly identical <0.1V bounds)
         out_p = prod_data.get('io', {}).get('steam_volts', 0.0)
         out_d = desk_data.get('io', {}).get('volts_out', 0.0)
@@ -102,22 +107,28 @@ def compare_and_print(prod_data, desk_data):
         if room_d_c != 0.0: # Skip if uninitialized
             room_d_f = (room_d_c * 9/5) + 32
             if abs(room_p - room_d_f) > 0.5:
-                alerts.append(f"  [!] SENSOR DEVIATION: Room DP discrepancy. Prod {room_p:.1f}F vs Desk {room_d_f:.1f}F.")
+                alerts.append(
+                    f"  [!] SENSOR DEVIATION: Room DP discrepancy."
+                    f" Prod {room_p:.1f}F vs Desk {room_d_f:.1f}F."
+                )
 
         duct_p = prod_data.get('psychrometrics', {}).get('post_steam_dp', 0.0)
         duct_d_c = desk_data.get('loop_b', {}).get('pv_duct_dp', 0.0)
         if duct_d_c != 0.0:
             duct_d_f = (duct_d_c * 9/5) + 32
             if abs(duct_p - duct_d_f) > 1.0:
-                alerts.append(f"  [!] SENSOR DEVIATION: Duct DP discrepancy (Wait for sensor filters to align). Prod {duct_p:.1f}F vs Desk {duct_d_f:.1f}F.")
-                
+                alerts.append(
+                    f"  [!] SENSOR DEVIATION: Duct DP discrepancy"
+                    f" (Wait for sensor filters to align)."
+                    f" Prod {duct_p:.1f}F vs Desk {duct_d_f:.1f}F."
+                )
+
     except Exception as e:
         alerts.append(f"  [!] Analysis Error: {e}")
-        
+
     for alert in alerts:
         # ANSII Bright Red
         print(f"\033[91m{alert}\033[0m")
-import paho.mqtt.client as mqtt
 from paho.mqtt.client import CallbackAPIVersion
 
 client = mqtt.Client(CallbackAPIVersion.VERSION2, "hapsic_auditor_script")
