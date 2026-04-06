@@ -123,7 +123,7 @@ actions:
         sequence:
           - variables:
               max_dp: "{{ states('sensor.hapsic_max_achievable_dp') }}"
-              target_dp: "{{ states('sensor.hapsic_target_duct_dp') }}"
+              target_dp: "{{ states('input_number.target_dew_point') }}"
               msg: >-
                 📉 HAPSIC can't reach your target dew point.
                 Target: {{ target_dp }}°F | Max achievable: {{ max_dp }}°F.

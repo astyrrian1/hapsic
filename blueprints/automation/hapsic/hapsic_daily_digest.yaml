@@ -50,7 +50,7 @@ variables:
   house_rh: "{{ states('sensor.hapsic_room_average_rh_broken') }}"
   house_temp: "{{ states('sensor.hapsic_room_average_temp_broken') }}"
   house_dp: "{{ states('sensor.hapsic_room_dew_point') }}"
-  target_dp: "{{ states('sensor.hapsic_target_duct_dp') }}"
+  target_dp: "{{ states('input_number.target_dew_point') }}"
   room_deficit: "{{ states('sensor.hapsic_room_deficit') }}"
   # --- Steam ---
   steam_v: "{{ states('sensor.hapsic_steam_voltage') | float(0) }}"

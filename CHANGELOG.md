@@ -3,6 +3,11 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.3.1] — 2026-04-06
+
+### Fixed
+- **Notification target DP mismatch**: Maintenance alerts and daily digest now display the user's actual target dew point (`input_number.target_dew_point`) instead of the PID Loop A duct target (`sensor.hapsic_target_duct_dp`). Previously, a user target of 48.0°F would show as ~50.1°F in notifications.
+
 ## [v2.3.0] — 2026-04-06
 
 ### Added
