@@ -113,6 +113,31 @@ class HapsicController(hass.Hass):
 
         self.chi_alpha = 0.00006
 
+        # --- Online Boiler Characterization Curve ---
+        # 4 voltage bins: [2-4V), [4-6V), [6-8V), [8-10V]
+        # Each stores EMA of measured steam delivery in lbs/hr
+        self.BOILER_CURVE_BINS = 4
+        self.BOILER_CURVE_V_MIN = 2.0     # Ignore sub-2V (no meaningful steam)
+        self.BOILER_CURVE_V_STEP = 2.0    # 2V per bin
+        self.BOILER_CURVE_MIN_SAMPLES = 50  # Gate: don't use until 50 data points
+        self.boiler_curve_alpha = 0.002   # ~6 min half-life at 5s ticks
+        self.boiler_curve_counts = [0] * self.BOILER_CURVE_BINS
+
+        # Restore boiler curve from persistent storage
+        try:
+            stored_curve = json.loads(
+                self.get_state("input_text.hapsic_boiler_curve"))
+            if isinstance(stored_curve, list) and len(stored_curve) == self.BOILER_CURVE_BINS:
+                self.boiler_curve = [float(v) for v in stored_curve]
+                # Mark restored bins as pre-trained
+                self.boiler_curve_counts = [
+                    999 if v > 0 else 0 for v in self.boiler_curve]
+                self.log(f"Boiler curve restored: {self.boiler_curve}")
+            else:
+                self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
+        except (ValueError, TypeError, json.JSONDecodeError, Exception):
+            self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
+
         # --- 3. RESTART HANDLING (Safety Park) ---
         self.log("SYSTEM RESTART DETECTED: Executing Safety Park Protocol...", level="WARNING")
         self.call_service("button/press", entity_id="button.zehnder_comfoair_q_a4cb9c_boost_off")
@@ -377,16 +402,17 @@ class HapsicController(hass.Hass):
             total_mass_factor = vent_mass_factor + infil_mass_factor
 
             if total_mass_factor > 0:
-                steam_plus_supply = self.MAX_CAPACITY + (vent_mass_factor * self.supply_w)
+                steam_plus_supply = self.get_effective_max_capacity() + (vent_mass_factor * self.supply_w)
                 max_room_w = (steam_plus_supply + (infil_mass_factor * self.outdoor_w)) / total_mass_factor
                 self.max_achievable_dp = self.calc_dp_from_w(max_room_w)
             else:
                 self.max_achievable_dp = self.supply_dp
 
             # Evaluated strictly for Telemetry & Windup protection
-            if self.target_room_dp > (self.max_achievable_dp + 0.5):
+            # Hysteresis: SET at +1.0°F, CLEAR at -0.5°F (deadband prevents chatter)
+            if self.target_room_dp > (self.max_achievable_dp + 1.0):
                 self.is_target_infeasible = True
-            elif self.target_room_dp < self.max_achievable_dp:
+            elif self.target_room_dp < (self.max_achievable_dp - 0.5):
                 self.is_target_infeasible = False
 
             return True
@@ -705,8 +731,8 @@ class HapsicController(hass.Hass):
         cfm = self.supply_flow * 0.5886
         lbs_hr_req = (w_req_grains * cfm * 60 * self.RHO) / 7000.0
 
-        # Clamp V_FF to the new 9.5V maximum efficiency ceiling
-        v_ff = min(9.5, (lbs_hr_req / self.MAX_CAPACITY) * 10.0)
+        # Use learned boiler curve when trained, falls back to linear model
+        v_ff = self.voltage_for_steam_rate(lbs_hr_req)
 
         # 2. Continuous Ideal PID
         error = self.target_duct_dp - self.duct_dp
@@ -838,6 +864,76 @@ class HapsicController(hass.Hass):
     # 8 & 9. DIAGNOSTICS & TELEMETRY
     # =========================================================================
 
+    # =========================================================================
+    # BOILER CHARACTERIZATION — Online voltage→delivery curve learning
+    # =========================================================================
+
+    def _boiler_curve_bin_idx(self, voltage):
+        """Map a voltage to a boiler curve bin index, or -1 if out of range."""
+        if voltage < self.BOILER_CURVE_V_MIN:
+            return -1
+        idx = int((voltage - self.BOILER_CURVE_V_MIN) / self.BOILER_CURVE_V_STEP)
+        return min(idx, self.BOILER_CURVE_BINS - 1)
+
+    def voltage_for_steam_rate(self, target_lbs_hr):
+        """Invert the learned boiler curve to find the voltage that produces target_lbs_hr.
+
+        Falls back to the linear MAX_CAPACITY model if the curve is untrained.
+        """
+        # Check if any bin is trained
+        any_trained = any(
+            c >= self.BOILER_CURVE_MIN_SAMPLES and v > 0
+            for c, v in zip(self.boiler_curve_counts, self.boiler_curve))
+
+        if not any_trained:
+            # Fallback: linear nameplate model
+            return min(9.5, (target_lbs_hr / self.MAX_CAPACITY) * 10.0)
+
+        # Walk bins low→high to find where target_lbs_hr falls
+        for i in range(self.BOILER_CURVE_BINS):
+            if self.boiler_curve_counts[i] < self.BOILER_CURVE_MIN_SAMPLES:
+                continue
+            if self.boiler_curve[i] <= 0:
+                continue
+
+            bin_mid_v = self.BOILER_CURVE_V_MIN + (i + 0.5) * self.BOILER_CURVE_V_STEP
+
+            if self.boiler_curve[i] >= target_lbs_hr:
+                # Target falls at or below this bin's measured rate
+                # Find previous trained bin for interpolation
+                prev_rate = 0.0
+                prev_v = 0.0
+                for j in range(i - 1, -1, -1):
+                    if (self.boiler_curve_counts[j] >= self.BOILER_CURVE_MIN_SAMPLES
+                            and self.boiler_curve[j] > 0):
+                        prev_rate = self.boiler_curve[j]
+                        prev_v = self.BOILER_CURVE_V_MIN + (j + 0.5) * self.BOILER_CURVE_V_STEP
+                        break
+
+                if self.boiler_curve[i] == prev_rate:
+                    return min(9.5, bin_mid_v)
+
+                frac = ((target_lbs_hr - prev_rate)
+                        / (self.boiler_curve[i] - prev_rate))
+                return min(9.5, prev_v + frac * (bin_mid_v - prev_v))
+
+        # Target exceeds all learned bins — clamp to max
+        return 9.5
+
+    def get_effective_max_capacity(self):
+        """Return the best estimate of max steam delivery (lbs/hr).
+
+        Uses the highest trained boiler curve bin if available,
+        falls back to CHI-corrected nameplate.
+        """
+        trained_vals = [
+            v for v, c in zip(self.boiler_curve, self.boiler_curve_counts)
+            if c >= self.BOILER_CURVE_MIN_SAMPLES and v > 0]
+        if trained_vals:
+            return max(trained_vals)
+        # Fallback: CHI-corrected nameplate
+        return self.MAX_CAPACITY * self.chi_ema
+
     def run_diagnostics(self):
         self.calc_steam_mass = (self.steam_voltage / 10.0) * self.MAX_CAPACITY
 
@@ -850,6 +946,7 @@ class HapsicController(hass.Hass):
         loss_infil = infil_mass_factor * max(0, self.room_w - self.outdoor_w)
         self.calc_flux = self.calc_steam_mass - (self.calc_loss_vent + loss_infil)
 
+        self._last_measured_steam = 0.0
         self.boil_status = "COLD"
         if self.boil_achieved and self.steam_voltage > 1.0:
             self.boil_status = "BOILING"
@@ -864,10 +961,28 @@ class HapsicController(hass.Hass):
                 self.chi_instant = max(0.0, min(2.0, self.chi_instant))
                 self.chi_ema = (self.chi_alpha * self.chi_instant) + ((1 - self.chi_alpha) * self.chi_ema)
 
+                # --- Boiler Curve Learning ---
+                # Convert actual grains/min delivery to lbs/hr
+                actual_lbs_hr = actual_grains * 60.0 / 7000.0
+                self._last_measured_steam = actual_lbs_hr
+
+                bin_idx = self._boiler_curve_bin_idx(self.steam_voltage)
+                if bin_idx >= 0 and actual_lbs_hr > 0:
+                    a = self.boiler_curve_alpha
+                    self.boiler_curve[bin_idx] = (
+                        a * actual_lbs_hr
+                        + (1 - a) * self.boiler_curve[bin_idx])
+                    self.boiler_curve_counts[bin_idx] += 1
+
+                # Persist CHI + boiler curve every 5 minutes (60 ticks)
                 if self.tick_counter % 60 == 0:
                     self.call_service("input_number/set_value",
                                       entity_id="input_number.hapsic_chi_ema",
                                       value=round(self.chi_ema, 3))
+                    self.call_service("input_text/set_value",
+                                      entity_id="input_text.hapsic_boiler_curve",
+                                      value=json.dumps(
+                                          [round(v, 4) for v in self.boiler_curve]))
             else:
                 self.chi_instant = 0.0
 
@@ -916,7 +1031,11 @@ class HapsicController(hass.Hass):
             "health": {
                 "boil_status": getattr(self, 'boil_status', "COLD"),
                 "chi_ratio": round(self.chi_instant, 3) if hasattr(self, 'chi_instant') else 0.0,
-                "chi_ema": round(self.chi_ema, 3)
+                "chi_ema": round(self.chi_ema, 3),
+                "boiler_curve": [round(v, 3) for v in self.boiler_curve],
+                "boiler_curve_samples": list(self.boiler_curve_counts),
+                "effective_max_capacity": round(self.get_effective_max_capacity(), 3),
+                "measured_steam_lbs_hr": round(getattr(self, '_last_measured_steam', 0.0), 3)
             }
         }
 

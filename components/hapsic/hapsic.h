@@ -88,7 +88,8 @@ class MagnusTetens {
 struct HapsicPersist {
   float chi_ema;
   float cached_target_rh;
-  uint32_t magic;  // 0xABCD1234 = valid data
+  float boiler_curve[4];  // [2-4V), [4-6V), [6-8V), [8-10V] EMA lbs/hr
+  uint32_t magic;         // 0xABCD1235 = valid data (bumped from 1234 for migration)
 };
 
 // =============================================================================
@@ -237,8 +238,8 @@ class HapsicController : public PollingComponent {
   // CONSTANTS
   // =========================================================================
   static constexpr float P_ATM = 88.6f;
-  static constexpr float RHO = 1.041f;  // kg/m^3 (Amarillo, TX approx indoor air density at 88.6 kPa
-                                        // equivalent to 0.065 lbs/ft^3)
+  static constexpr float RHO = 1.041f;      // kg/m^3 (SI — used in feasibility horizon)
+  static constexpr float RHO_IMP = 0.065f;  // lbs/ft^3 (imperial — used in diagnostics / boiler curve)
   static constexpr float EMA_ALPHA = 0.1f;
   static constexpr float CHI_ALPHA = 0.00006f;
   static constexpr float MAX_DUCT_DP = 15.56f;  // 60F in C
@@ -366,11 +367,22 @@ class HapsicController : public PollingComponent {
 
   // Diagnostics
   float chi_ema_ = 1.0f;
+  float chi_instant_ = 0.0f;
   std::string boil_status_ = "COLD";
   float steam_mass_kg_hr_ = 0.0f;
   float net_flux_ = 0.0f;
   float vent_loss_ = 0.0f;
   float v_ff_ = 0.0f;
+  float last_measured_steam_ = 0.0f;
+
+  // Boiler characterization curve (4 bins: [2-4V), [4-6V), [6-8V), [8-10V])
+  static constexpr int BOILER_CURVE_BINS = 4;
+  static constexpr float BOILER_CURVE_V_MIN = 2.0f;
+  static constexpr float BOILER_CURVE_V_STEP = 2.0f;
+  static constexpr int BOILER_CURVE_MIN_SAMPLES = 50;
+  static constexpr float BOILER_CURVE_ALPHA = 0.002f;
+  float boiler_curve_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  int boiler_curve_counts_[4] = {0, 0, 0, 0};
 
   // NVS persistence
   ESPPreferenceObject pref_;
@@ -486,6 +498,11 @@ class HapsicController : public PollingComponent {
   void update_buttons();
   void publish_terminal_heartbeat();
   const char *state_name(State s);
+
+  // Boiler characterization
+  int boiler_curve_bin_idx(float voltage);
+  float voltage_for_steam_rate(float target_lbs_hr);
+  float get_effective_max_capacity();
 };
 
 }  // namespace hapsic

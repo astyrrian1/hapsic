@@ -523,19 +523,19 @@ bool HapsicController::read_sensors() {
   if (total_m3h > 0.1f) {
     float incoming_w = ((supply_flow_ * supply_w_) + ((total_loss_cfm_ / 0.5886f) * outdoor_w_)) / total_m3h;
 
-    // mass conversion logic (g/kg): Max capacity must be kg/hr * 1000 to yield
-    // grams delta_w is injection rate per hr divided by dynamic air mass
-    // throughput
-    float delta_w = (max_capacity_ * 1000.0f) / ((total_m3h * RHO));
+    // Use learned max delivery rate (lbs/hr → kg/h) for realistic feasibility
+    float effective_max_kg_hr = get_effective_max_capacity() * 0.453592f;
+    float delta_w = (effective_max_kg_hr * 1000.0f) / (total_m3h * RHO);
 
     max_achievable_dp_ = MagnusTetens::target_dp_from_w(incoming_w + delta_w, P_ATM);
   } else {
     max_achievable_dp_ = -40.0f;
   }
 
+  // Hysteresis: SET at +0.5C, CLEAR at -0.25C (deadband prevents chatter)
   if (target_room_dp_ > (max_achievable_dp_ + 0.5f)) {
     is_target_infeasible_ = true;
-  } else {
+  } else if (target_room_dp_ < (max_achievable_dp_ - 0.25f)) {
     is_target_infeasible_ = false;
   }
 
@@ -810,18 +810,16 @@ void HapsicController::execute_loop_b() {
     boil_achieved_ = false;
   }
 
-  // Feed-Forward
+  // Feed-Forward — compute moisture demand then invert learned boiler curve
   float target_w = MagnusTetens::target_w_from_dp(target_duct_dp_, P_ATM);
   float w_req = std::max(0.0f, target_w - supply_w_);
-  float air_mass_kg_h = supply_flow_ * RHO;
-  float grams_water_h = w_req * air_mass_kg_h;
-  float kg_water_h = grams_water_h / 1000.0f;
+  // Imperial path (parity with Python): CFM * 60 * RHO_IMP = lbs/hr dry air
+  float cfm = supply_flow_ * 0.5886f;
+  float w_req_grains = w_req * (7000.0f / 1000.0f);  // g/kg → grains/lb
+  float lbs_hr_req = (w_req_grains * cfm * 60.0f * RHO_IMP) / 7000.0f;
 
-  if (max_capacity_ > 0.1f) {
-    v_ff_ = std::min(9.5f, (kg_water_h / max_capacity_) * 10.0f);
-  } else {
-    v_ff_ = 0.0f;
-  }
+  // Use learned boiler curve when trained, falls back to linear model
+  v_ff_ = voltage_for_steam_rate(lbs_hr_req);
 
   // Error & Deadband
   float error = target_duct_dp_ - duct_dp_;
@@ -977,33 +975,38 @@ void HapsicController::write_output() {
 void HapsicController::run_diagnostics() {
   steam_mass_kg_hr_ = (steam_voltage_ / 10.0f) * max_capacity_;
 
-  float cfm = supply_flow_ * 0.5886f;
-  float dry_air_kg_hr = cfm * 60.0f * RHO;
+  float cfm_nat = 1380.0f / 17.0f;
 
-  if (dry_air_kg_hr > 0.01f && room_w_ > supply_w_) {
-    vent_loss_ = (dry_air_kg_hr * (room_w_ - supply_w_)) / 1000.0f;
-  } else {
-    vent_loss_ = 0.0f;
-  }
+  float vent_mass_factor = ((supply_flow_ * 0.5886f) * 60.0f * RHO_IMP) / 7000.0f;
+  float infil_mass_factor = (cfm_nat * 60.0f * RHO_IMP) / 7000.0f;
 
-  net_flux_ = steam_mass_kg_hr_ - vent_loss_;
+  vent_loss_ = vent_mass_factor * std::max(0.0f, room_w_ - supply_w_);
+  float loss_infil = infil_mass_factor * std::max(0.0f, room_w_ - outdoor_w_);
+  net_flux_ = steam_mass_kg_hr_ - (vent_loss_ + loss_infil);
 
+  last_measured_steam_ = 0.0f;
   if (active_cruise_ticks_ > BOILING_MIN_TICKS && steam_voltage_ > BOILING_MIN_VOLTAGE) {
     boil_status_ = "BOILING";
 
-    float theo_grams = steam_mass_kg_hr_ * (1000.0f / 60.0f);
-    float actual_grams = 0.0f;
-    if (dry_air_kg_hr > 0.01f) {
-      actual_grams = (duct_w_ - supply_w_) * dry_air_kg_hr / 60.0f;
-    }
+    float dry_air_mass_lbs_hr = (supply_flow_ * 0.5886f) * 60.0f * RHO_IMP;
+    float theo_grains = steam_mass_kg_hr_ * (7000.0f / 60.0f);
+    float actual_grains = (duct_w_ - supply_w_) * dry_air_mass_lbs_hr / 60.0f;
 
-    if (theo_grams > 1.5f) {  // Approximately equivalent to 100 grains/min
-      float chi_instant = actual_grams / theo_grams;
-      chi_instant = std::max(0.0f, std::min(2.0f, chi_instant));
+    // CHI Gating strictly evaluated off physical boil state
+    if (theo_grains > 100.0f && boil_achieved_ && !stasis_active_) {
+      chi_instant_ = actual_grains / theo_grains;
+      chi_instant_ = std::max(0.0f, std::min(2.0f, chi_instant_));
+      chi_ema_ = (CHI_ALPHA * chi_instant_) + ((1.0f - CHI_ALPHA) * chi_ema_);
 
-      // Update CHI EMA ONLY when stable boiling and not in stasis
-      if (boil_achieved_ && !stasis_active_) {
-        chi_ema_ = (CHI_ALPHA * chi_instant) + ((1.0f - CHI_ALPHA) * chi_ema_);
+      // --- Boiler Curve Learning ---
+      float actual_lbs_hr = actual_grains * 60.0f / 7000.0f;
+      last_measured_steam_ = actual_lbs_hr;
+
+      int bin_idx = boiler_curve_bin_idx(steam_voltage_);
+      if (bin_idx >= 0 && actual_lbs_hr > 0.0f) {
+        boiler_curve_[bin_idx] =
+            (BOILER_CURVE_ALPHA * actual_lbs_hr) + ((1.0f - BOILER_CURVE_ALPHA) * boiler_curve_[bin_idx]);
+        boiler_curve_counts_[bin_idx]++;
       }
     }
   } else {
@@ -1017,10 +1020,84 @@ void HapsicController::run_diagnostics() {
     HapsicPersist data;
     data.chi_ema = chi_ema_;
     data.cached_target_rh = cached_target_dp_;  // Mapping DP into legacy struct slot
-    data.magic = 0xABCD1234;
+    for (int i = 0; i < BOILER_CURVE_BINS; i++) {
+      data.boiler_curve[i] = boiler_curve_[i];
+    }
+    data.magic = 0xABCD1235;
     pref_.save(&data);
-    ESP_LOGD("hapsic", "NVS persisted: CHI=%.4f, target_dp=%.1f C", chi_ema_, cached_target_dp_);
+    ESP_LOGD("hapsic", "NVS persisted: CHI=%.4f, target_dp=%.1f, curve=[%.3f,%.3f,%.3f,%.3f]", chi_ema_,
+             cached_target_dp_, boiler_curve_[0], boiler_curve_[1], boiler_curve_[2], boiler_curve_[3]);
   }
+}
+
+// =============================================================================
+// BOILER CHARACTERIZATION — helpers
+// =============================================================================
+
+int HapsicController::boiler_curve_bin_idx(float voltage) {
+  if (voltage < BOILER_CURVE_V_MIN)
+    return -1;
+  int idx = static_cast<int>((voltage - BOILER_CURVE_V_MIN) / BOILER_CURVE_V_STEP);
+  return std::min(idx, BOILER_CURVE_BINS - 1);
+}
+
+float HapsicController::voltage_for_steam_rate(float target_lbs_hr) {
+  // Check if any bin is trained
+  bool any_trained = false;
+  for (int i = 0; i < BOILER_CURVE_BINS; i++) {
+    if (boiler_curve_counts_[i] >= BOILER_CURVE_MIN_SAMPLES && boiler_curve_[i] > 0.0f) {
+      any_trained = true;
+      break;
+    }
+  }
+
+  if (!any_trained) {
+    // Fallback: linear nameplate model
+    return std::min(9.5f, (target_lbs_hr / max_capacity_) * 10.0f);
+  }
+
+  // Walk bins low→high to find where target falls
+  for (int i = 0; i < BOILER_CURVE_BINS; i++) {
+    if (boiler_curve_counts_[i] < BOILER_CURVE_MIN_SAMPLES)
+      continue;
+    if (boiler_curve_[i] <= 0.0f)
+      continue;
+
+    float bin_mid_v = BOILER_CURVE_V_MIN + (i + 0.5f) * BOILER_CURVE_V_STEP;
+
+    if (boiler_curve_[i] >= target_lbs_hr) {
+      float prev_rate = 0.0f;
+      float prev_v = 0.0f;
+      for (int j = i - 1; j >= 0; j--) {
+        if (boiler_curve_counts_[j] >= BOILER_CURVE_MIN_SAMPLES && boiler_curve_[j] > 0.0f) {
+          prev_rate = boiler_curve_[j];
+          prev_v = BOILER_CURVE_V_MIN + (j + 0.5f) * BOILER_CURVE_V_STEP;
+          break;
+        }
+      }
+
+      if (boiler_curve_[i] == prev_rate) {
+        return std::min(9.5f, bin_mid_v);
+      }
+
+      float frac = (target_lbs_hr - prev_rate) / (boiler_curve_[i] - prev_rate);
+      return std::min(9.5f, prev_v + frac * (bin_mid_v - prev_v));
+    }
+  }
+
+  return 9.5f;  // Target exceeds all learned bins
+}
+
+float HapsicController::get_effective_max_capacity() {
+  float best = 0.0f;
+  for (int i = 0; i < BOILER_CURVE_BINS; i++) {
+    if (boiler_curve_counts_[i] >= BOILER_CURVE_MIN_SAMPLES && boiler_curve_[i] > best) {
+      best = boiler_curve_[i];
+    }
+  }
+  if (best > 0.0f)
+    return best;
+  return max_capacity_ * chi_ema_;
 }
 
 // =============================================================================

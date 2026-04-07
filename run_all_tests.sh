@@ -73,7 +73,11 @@ echo "=== 11. Integration Tests — FSM Transitions ==="
 python3 test_fsm_transitions.py
 echo "✓ All FSM state transitions validated."
 
-echo "=== 12. System Tests — Offline Cross-Platform Parity ==="
+echo "=== 12. Regression Tests — Infeasibility Hysteresis ==="
+python3 test_infeasibility_hysteresis.py
+echo "✓ All infeasibility hysteresis deadband tests validated."
+
+echo "=== 13. System Tests — Offline Cross-Platform Parity ==="
 python3 test_offline_parity.py
 echo "✓ Python/C++ offline parity validated."
 

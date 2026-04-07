@@ -3,6 +3,23 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.4.0] — 2026-04-07
+
+### Added
+- **Online Boiler Characterization Curve**: Runtime learning of the actual voltage→steam-delivery relationship. Four 2V bins (2–4V, 4–6V, 6–8V, 8–10V) accumulate EMA-smoothed measurements of lbs/hr at each voltage level. After 50 samples per bin the learned curve replaces the linear nameplate model for V_FF feedforward computation and max-achievable-DP feasibility calculations.
+- **Persistent boiler curve storage**: Curve data persists across restarts via `input_text.hapsic_boiler_curve` (JSON array). Restored bins are pre-marked as trained on startup.
+- **`get_effective_max_capacity()`**: Returns the highest learned delivery rate when trained, falling back to CHI-corrected nameplate capacity.
+- **`voltage_for_steam_rate()`**: Inverts the learned curve with linear interpolation between trained bins. Replaces the hard-coded `(lbs_hr / MAX_CAPACITY) * 10.0` formula.
+- **Boiler curve telemetry**: New MQTT fields — `boiler_curve`, `boiler_curve_samples`, `effective_max_capacity`, `measured_steam_lbs_hr` — exposed in the `health` telemetry block.
+- **Infeasibility hysteresis tests**: 10 new tests validating the SET/CLEAR deadband, boundary conditions, oscillation resistance, and multi-cycle drift-free operation.
+
+### Changed
+- **Infeasibility hysteresis deadband widened**: SET threshold raised from +0.5°F to +1.0°F above max-achievable DP; CLEAR threshold moved from 0.0°F to −0.5°F below. The 1.5°F deadband eliminates chatter during boundary oscillation without meaningfully delaying SET/CLEAR transitions.
+- **Feasibility mass-balance uses learned capacity**: `get_effective_max_capacity()` replaces raw `MAX_CAPACITY` in the mass-balance equation, giving more accurate feasibility horizons as the boiler ages or canister health degrades.
+
+### Architecture
+- Python Digital Twin and C++ ESPHome firmware remain mathematically identical — both implement the same 4-bin EMA boiler curve with shared constants and identical interpolation logic.
+
 ## [v2.3.3] — 2026-04-07
 
 ### Fixed
