@@ -49,7 +49,13 @@ sys.modules['appdaemon.plugins.hass.hassapi'] = hassapi
 
 hassapi.Hass = MockHass
 
-from apps.hapsic_controller import hapsic_controller as hapsic
+import importlib.util
+import pathlib
+
+_p = pathlib.Path(__file__).parent / "apps" / "hapsic-controller" / "hapsic_controller.py"
+_s = importlib.util.spec_from_file_location("hapsic_controller", _p)
+hapsic = importlib.util.module_from_spec(_s)
+_s.loader.exec_module(hapsic)
 
 
 def run_tests():

@@ -16,7 +16,7 @@ Release a new version of the HAPSIC Python controller to HACS.
 
 1. Update `CHANGELOG.md` with the new version entry at the top of the file. Follow the existing format — include Added, Changed, Fixed, Architecture sections as appropriate. The version number follows semver: bump patch for fixes, minor for features, major for breaking changes.
 
-2. Update the version string in `apps/hapsic_controller/hapsic_controller.py` if there's a `VERSION` constant or docstring reference.
+2. Update the version string in `apps/hapsic-controller/hapsic_controller.py` if there's a `VERSION` constant or docstring reference.
 
 3. Commit the changelog and any final changes:
 ```bash
