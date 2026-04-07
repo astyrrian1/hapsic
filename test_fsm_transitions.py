@@ -350,6 +350,72 @@ def test_fault_recovery():
                 f"fault_recovery (state={c.fsm_state})")
 
 
+def test_cruise_exits_at_target_met_regardless_of_voltage():
+    """REGRESSION: ACTIVE_CRUISE must exit to STANDBY when room DP >= target,
+    even if steam_voltage is non-zero (integrator wound up).
+
+    This was the root cause of the 2026-04-07 deadlock: Loop A's integrator
+    kept voltage positive while room DP slightly exceeded target, and the old
+    code only had a voltage-gated exit (steam_voltage == 0.0 and deficit < 0.5).
+    The C++ firmware (line 670) never had this voltage gate.
+    """
+    c = make_controller()
+    tick(c, 10)  # Enter ACTIVE_CRUISE, build up voltage
+    assert_state(c, "ACTIVE_CRUISE", "regression_pre_cruise")
+
+    # RH=53 at T=68°F → DP=50.23°F, target=50°F → deficit=-0.23 (slightly above target)
+    c.states["sensor.hapsic_room_average_rh"] = 53.0
+    c.states["sensor.hapsic_cleansed_inside_rh"] = 53.0
+
+    tick(c, 3)
+    assert_state(c, "STANDBY", "regression_target_met_nonzero_voltage")
+    assert_true(c.steam_voltage == 0.0,
+                f"regression_voltage_zeroed_on_standby (V={c.steam_voltage})")
+
+
+def test_cruise_deadlock_scenario():
+    """REGRESSION: The exact production deadlock — room DP barely above target
+    with integrator windup. System must NOT stay in ACTIVE_CRUISE.
+
+    At RH=53/T=68: room_dp=50.23, target=50.0 → deficit=-0.23.
+    The old code required steam_voltage==0.0 to exit, but the integrator
+    keeps voltage positive, creating an infinite deadlock.
+    """
+    c = make_controller()
+    tick(c, 10)
+    assert_state(c, "ACTIVE_CRUISE", "deadlock_pre_cruise")
+    assert_true(c.steam_voltage > 0.0,
+                f"deadlock_has_nonzero_voltage (V={c.steam_voltage})")
+
+    # Push room DP slightly above target (the deadlock condition)
+    c.states["sensor.hapsic_room_average_rh"] = 53.0
+    c.states["sensor.hapsic_cleansed_inside_rh"] = 53.0
+
+    tick(c, 3)
+    assert_true(c.fsm_state != "ACTIVE_CRUISE",
+                f"deadlock_must_exit_cruise (state={c.fsm_state}, V={c.steam_voltage})")
+
+
+def test_satisfaction_coasting_still_works():
+    """Satisfaction coasting (deficit < 0.5 AND voltage == 0) must still work.
+    This validates the existing path wasn't broken by the new Target Met check.
+
+    At RH=52/T=68: room_dp=49.72, target=50.0 → deficit=+0.28 (below 0.5 threshold).
+    """
+    c = make_controller()
+    tick(c, 10)
+    assert_state(c, "ACTIVE_CRUISE", "coasting_pre_cruise")
+
+    # Nearly satisfied: RH=52 → DP=49.72, deficit=0.28 < 0.5
+    c.states["sensor.hapsic_room_average_rh"] = 52.0
+    c.states["sensor.hapsic_cleansed_inside_rh"] = 52.0
+    # Force voltage to zero (simulating integrator having wound down)
+    c.steam_voltage = 0.0
+
+    tick(c, 1)
+    assert_state(c, "STANDBY", "coasting_exits_at_low_deficit_zero_voltage")
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("  HAPSIC FSM Transition Matrix Tests")
@@ -366,6 +432,9 @@ if __name__ == "__main__":
     test_ceiling_limiter()
     test_bypass_awareness()
     test_fault_recovery()
+    test_cruise_exits_at_target_met_regardless_of_voltage()
+    test_cruise_deadlock_scenario()
+    test_satisfaction_coasting_still_works()
 
     print()
     for r in results:
@@ -379,3 +448,4 @@ if __name__ == "__main__":
     else:
         print("  ✅ ALL TESTS PASSED")
         sys.exit(0)
+

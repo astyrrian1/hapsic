@@ -6,11 +6,18 @@ description: Run live MQTT audit comparing production and desk telemetry
 
 Monitor real-time telemetry from both production (Python) and desk (C++) units side-by-side.
 
+## Prerequisites
+
+Activate the project venv:
+```bash
+source .venv/bin/activate
+```
+
 ## Steps
 
 1. Start the MQTT diff auditor in the background:
 ```bash
-python3 read_mqtt_diff.py
+source .venv/bin/activate && python3 read_mqtt_diff.py
 ```
 
 2. Let it run for at least 15 seconds to accumulate data.
@@ -21,7 +28,7 @@ python3 read_mqtt_diff.py
    - **SENSOR DEVIATION**: Check sensor fallback chains and HA entity availability.
 
 4. To investigate a discrepancy:
-   - Run `python3 test_component_parity.py` to isolate which component diverges.
+   - Run `source .venv/bin/activate && python3 test_component_parity.py` to isolate which component diverges.
    - Check C++ source in `components/hapsic/hapsic.cpp` for the specific computation.
 
 5. To terminate the auditor, press `Ctrl+C`.
