@@ -3,6 +3,18 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.3.2] — 2026-04-07
+
+### Fixed
+- **ACTIVE_CRUISE deadlock**: FSM could get stuck in `ACTIVE_CRUISE` indefinitely when room dew point slightly exceeded the target while Loop A's integrator held voltage positive. The only exit path required `steam_voltage == 0.0`, which the integrator couldn't reach. Added a **Target Met** check (`room_deficit <= 0.0`) that fires unconditionally, matching the C++ firmware's existing behavior.
+
+### Added
+- **Deadlock regression tests**: Three new FSM tests covering the exact production deadlock scenario, target-met-with-nonzero-voltage, and satisfaction coasting validation.
+- **Dev environment tooling**: `requirements-dev.txt` for reproducible venv setup; auto-activation guards in `run_presubmit.sh` and `run_all_tests.sh`; venv instructions in agent workflows.
+
+### Changed
+- Disabled MQTT telemetry in desk unit ESPHome config (`stamplc_desk.yaml`).
+
 ## [v2.3.1] — 2026-04-06
 
 ### Fixed
