@@ -1,0 +1,14 @@
+# HAPSIC development dependencies
+# Install: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
+
+# Testing
+pytest>=8.0
+
+# Linting
+ruff>=0.4
+
+# Live MQTT tests (optional — only needed for --live mode)
+paho-mqtt>=2.0
+
+# YAML parsing (scenario builder)
+pyyaml>=6.0

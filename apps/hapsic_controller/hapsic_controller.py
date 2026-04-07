@@ -573,7 +573,19 @@ class HapsicController(hass.Hass):
 
             room_deficit = self.target_room_dp - self.room_dp
 
-            # [NEW] Satisfaction Coasting (Prevents Min-Fire PWM slamming)
+            # Target Met: Room DP at or above setpoint → coast to STANDBY
+            if room_deficit <= 0.0:
+                self.log(
+                    f"FSM TRANSITION: ACTIVE_CRUISE -> STANDBY (Target Met: "
+                    f"room={self.room_dp:.1f}F >= target={self.target_room_dp:.1f}F).",
+                    level="INFO",
+                )
+                self.fsm_state = "STANDBY"
+                self.boil_achieved = False
+                self.call_service("switch/turn_on", entity_id="switch.zehnder_comfoair_q_a4cb9c_auto_ventilation")
+                return
+
+            # Satisfaction Coasting: Nearly satisfied AND voltage already wound down
             if self.steam_voltage == 0.0 and room_deficit < 0.5:
                 self.log("FSM TRANSITION: ACTIVE_CRUISE -> STANDBY (Satisfaction Coasting).", level="INFO")
                 self.fsm_state = "STANDBY"

@@ -10,6 +10,22 @@ set -e
 # Usage:
 #     bash run_presubmit.sh          # Offline only
 #     bash run_presubmit.sh --live   # Offline + live MQTT tests
+#
+# Prerequisites:
+#     python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
+
+if [[ -z "$VIRTUAL_ENV" ]]; then
+  if [[ -f "$VENV_DIR/bin/activate" ]]; then
+    source "$VENV_DIR/bin/activate"
+  else
+    echo "❌ No virtualenv found at $VENV_DIR"
+    echo "   Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt"
+    exit 1
+  fi
+fi
 
 LIVE_MODE=false
 if [[ "$1" == "--live" ]]; then
@@ -27,7 +43,7 @@ if command -v ruff &> /dev/null; then
   ruff check .
   echo "✓ Python lint clean."
 else
-  echo "⚠ ruff not installed. Install: brew install ruff"
+  echo "⚠ ruff not installed. Run: pip install -r requirements-dev.txt"
   exit 1
 fi
 

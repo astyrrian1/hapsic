@@ -4,6 +4,19 @@ set -e # Exit immediately if any command returns a non-zero status
 # ==========================================
 # HAPSIC ENTERPRISE TEST SUITE (CI RUNNER)
 # ==========================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
+
+if [[ -z "$VIRTUAL_ENV" ]]; then
+  if [[ -f "$VENV_DIR/bin/activate" ]]; then
+    source "$VENV_DIR/bin/activate"
+  else
+    echo "❌ No virtualenv found at $VENV_DIR"
+    echo "   Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt"
+    exit 1
+  fi
+fi
 echo "=== 1. Starting Production ESPHome Configuration Verification ==="
 bash verify.sh
 

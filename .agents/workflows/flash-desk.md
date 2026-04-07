@@ -6,6 +6,13 @@ description: Compile, flash, and validate the desk unit firmware
 
 Compile the desk firmware with shadow integrator enabled, flash it to the ESP32, and run validation tests.
 
+## Prerequisites
+
+Activate the project venv before running Python tests:
+```bash
+source .venv/bin/activate
+```
+
 ## Steps
 
 // turbo-all
@@ -25,17 +32,17 @@ esphome run stamplc_desk.yaml --device /dev/cu.usbmodem101
 
 4. Run Mode D (Component Parity) to validate math before testing convergence:
 ```bash
-python3 test_component_parity.py
+source .venv/bin/activate && python3 test_component_parity.py
 ```
 
 5. Run Mode C (Shadow Integrator) to validate voltage convergence:
 ```bash
-python3 test_shadow_integrator.py
+source .venv/bin/activate && python3 test_shadow_integrator.py
 ```
 
 6. For continuous monitoring, run the MQTT diff auditor:
 ```bash
-python3 read_mqtt_diff.py
+source .venv/bin/activate && python3 read_mqtt_diff.py
 ```
 
 ## Troubleshooting
