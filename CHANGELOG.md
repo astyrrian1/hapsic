@@ -3,6 +3,16 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.3.3] — 2026-04-07
+
+### Fixed
+- **AppDaemon MissingAppClass crash**: Renamed `apps/hapsic_controller/` → `apps/hapsic-controller/` (hyphen). The underscore-named directory collided with the module name `hapsic_controller` — when `__init__.py` was present, Python resolved the *directory* as the module instead of the `.py` file, giving AppDaemon an empty module and crashing with `MissingAppClass`. The hyphenated directory name is un-importable as a Python package, permanently preventing this class of bug.
+
+### Changed
+- **Test imports**: All test files and standalone scripts (`scenario_tester.py`, `run_compare.py`) now use `importlib` file-based loading instead of `from apps.hapsic_controller import ...`. A shared `conftest.py` centralizes the import for pytest runs.
+- **Removed `__init__.py` files**: No longer needed or shipped — the hyphenated directory makes them structurally impossible to abuse.
+- **Cleaned `.gitignore`**: Removed `__init__.py` exclusion rules that are no longer relevant.
+
 ## [v2.3.2] — 2026-04-07
 
 ### Fixed

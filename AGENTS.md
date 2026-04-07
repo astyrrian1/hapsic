@@ -8,7 +8,7 @@ HAPSIC (Home Assistant Psychrometric Source Integrated Controller) is a physics-
 
 ```
 hapsic/
-├── apps/hapsic_controller/
+├── apps/hapsic-controller/
 │   ├── apps.yaml                  # AppDaemon app discovery (required for HACS)
 │   └── hapsic_controller.py       # Python Digital Twin (SINGLE SOURCE OF TRUTH)
 ├── components/hapsic/             # C++ ESPHome firmware
@@ -25,8 +25,8 @@ hapsic/
 ## Critical Rules
 
 ### Source of Truth
-- `apps/hapsic_controller/hapsic_controller.py` is the **only** Python controller file. There is no root-level `hapsic.py`.
-- All test files import from `apps.hapsic_controller.hapsic_controller`.
+- `apps/hapsic-controller/hapsic_controller.py` is the **only** Python controller file. There is no root-level `hapsic.py`.
+- All test files import via `conftest.py` (importlib file-based load). No `__init__.py` files in `apps/`.
 - The C++ firmware in `components/hapsic/` must remain mathematically identical to the Python twin.
 
 ### Versioning & Releases
@@ -42,9 +42,10 @@ hapsic/
 
 ### HACS Deployment
 - HACS installs the **entire repo** to `/addon_configs/a0d7b954_appdaemon/apps/hapsic/` (folder named after repo, not the app)
-- The Python module ends up at `apps/hapsic/apps/hapsic_controller/hapsic_controller.py`
-- `apps/hapsic_controller/apps.yaml` **must** ship with the repo — AppDaemon auto-discovers apps by recursively scanning for `apps.yaml` files
-- **Known gotcha**: If a user previously installed manually to `apps/hapsic_controller/`, that old folder takes precedence over the HACS-installed copy. The old folder must be deleted after switching to HACS.
+- The Python module ends up at `apps/hapsic/apps/hapsic-controller/hapsic_controller.py`
+- `apps/hapsic-controller/apps.yaml` **must** ship with the repo — AppDaemon auto-discovers apps by recursively scanning for `apps.yaml` files
+- The directory uses a **hyphen** (`hapsic-controller`) deliberately — Python can't import hyphenated names as packages, preventing `__init__.py` from ever shadowing the module
+- **Known gotcha**: If a user previously installed manually to `apps/hapsic_controller/` or `apps/hapsic-controller/`, that old folder takes precedence over the HACS-installed copy. The old folder must be deleted after switching to HACS.
 - After HACS updates, **AppDaemon must be restarted** to load the new code
 
 ### Dashboard
