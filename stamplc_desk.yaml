@@ -158,14 +158,14 @@ power_supply:
 
 
 # =============================================================================
-# MQTT TELEMETRY
+# MQTT TELEMETRY — DISABLED (desk unit not needed)
 # =============================================================================
 
-mqtt:
-  broker: !secret mqtt_broker
-  username: !secret mqtt_username
-  password: !secret mqtt_password
-  topic_prefix: hapsic-desk
+# mqtt:
+#   broker: !secret mqtt_broker
+#   username: !secret mqtt_username
+#   password: !secret mqtt_password
+#   topic_prefix: hapsic-desk
 
 # =============================================================================
 # OUTPUTS (Actuators)
