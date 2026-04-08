@@ -592,6 +592,12 @@ hapsic:
     name: "HAPSIC IO Steam Mass LBS (Desk Mode)"
   tel_health_chi_ema:
     name: "HAPSIC Health CHI EMA (Desk Mode)"
+  tel_health_chi_instant:
+    name: "HAPSIC Health CHI Instant (Desk Mode)"
+  tel_health_effective_max:
+    name: "HAPSIC Health Effective Max (Desk Mode)"
+  tel_health_measured_steam:
+    name: "HAPSIC Health Measured Steam (Desk Mode)"
   tel_feasibility_is_infeasible:
     name: "HAPSIC Feasibility Is Infeasible (Desk Mode)"
   tel_batch_boil_achieved:
@@ -600,3 +606,5 @@ hapsic:
     name: "HAPSIC Batch Stasis Active (Desk Mode)"
   tel_limiters_active_limit:
     name: "HAPSIC Limiters Active Limit (Desk Mode)"
+  tel_health_boil_status:
+    name: "HAPSIC Health Boil Status (Desk Mode)"

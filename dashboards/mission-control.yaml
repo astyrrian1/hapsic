@@ -93,6 +93,84 @@ cards:
                   else %} grey {% endif %};">{{
                   states('sensor.hapsic_boil_status') }}</span></center>
       - type: heading
+        heading: Boiler Health & Characterization
+        heading_style: title
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.hapsic_steam_mass
+            name: Measured Steam
+            icon: mdi:gauge
+            color: >-
+              {% set val = states('sensor.hapsic_steam_mass')|float(0) %}
+              {% if val > 4 %} orange {% elif val > 0 %} green {% else %} grey {% endif %}
+            state_content: state
+          - type: tile
+            entity: input_number.humidifier_max_capacity
+            name: Effective Max
+            icon: mdi:speedometer-medium
+            color: cyan
+            state_content: state
+          - type: tile
+            entity: sensor.hapsic_boil_status
+            name: Boiler State
+            icon: >-
+              {% if states('sensor.hapsic_boil_status') == 'BOILING' %}
+              mdi:fire {% else %} mdi:snowflake {% endif %}
+            color: >-
+              {% if states('sensor.hapsic_boil_status') == 'BOILING' %}
+              red {% else %} grey {% endif %}
+      - type: markdown
+        title: Boiler Curve (Learned)
+        content: >
+          {% set curve = states('input_text.hapsic_boiler_curve') %}
+
+          {% set bins = curve | from_json if curve not in ['unknown','unavailable'] else [0,0,0,0] %}
+
+          | Voltage Band | 0–2.5V | 2.5–5V | 5–7.5V | 7.5–10V |
+
+          | :---: | :---: | :---: | :---: | :---: |
+
+          | **Capacity** | {{ '%.2f'|format(bins[0]) }} | {{ '%.2f'|format(bins[1]) }} | {{ '%.2f'|format(bins[2]) }} | {{ '%.2f'|format(bins[3]) }} |
+
+          | **Bar** | {{ '█' * ((bins[0]*10)|int) }} | {{ '█' * ((bins[1]*10)|int) }} | {{ '█' * ((bins[2]*10)|int) }} | {{ '█' * ((bins[3]*10)|int) }} |
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Canister Health (χ Ratio)
+          show_states: true
+          colorize_states: true
+        graph_span: 12h
+        experimental:
+          color_threshold: true
+        series:
+          - entity: sensor.hapsic_chi_instant
+            name: χ Instant
+            stroke_width: 1
+            opacity: 0.6
+            show:
+              in_header: true
+            color_threshold:
+              - value: 0
+                color: "#f44336"
+              - value: 70
+                color: "#ff9800"
+              - value: 90
+                color: "#4caf50"
+          - entity: input_number.hapsic_chi_ema
+            name: χ EMA (48h)
+            stroke_width: 2
+            color: "#9b59b6"
+            curve: smooth
+            show:
+              in_header: true
+        yaxis:
+          - min: 0
+            max: 120
+            decimals: 0
+      - type: heading
         heading: Physics Engine (Decoupled)
         heading_style: title
       - type: entities
