@@ -513,6 +513,12 @@ hapsic:
     name: "HAPSIC IO Steam Mass LBS"
   tel_health_chi_ema:
     name: "HAPSIC Health CHI EMA"
+  tel_health_chi_instant:
+    name: "HAPSIC Health CHI Instant"
+  tel_health_effective_max:
+    name: "HAPSIC Health Effective Max"
+  tel_health_measured_steam:
+    name: "HAPSIC Health Measured Steam"
   tel_feasibility_is_infeasible:
     name: "HAPSIC Feasibility Is Infeasible"
   tel_batch_boil_achieved:
@@ -521,3 +527,5 @@ hapsic:
     name: "HAPSIC Batch Stasis Active"
   tel_limiters_active_limit:
     name: "HAPSIC Limiters Active Limit"
+  tel_health_boil_status:
+    name: "HAPSIC Health Boil Status"
