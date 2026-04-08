@@ -3,6 +3,23 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.5.0] — 2026-04-08
+
+### Added
+- **4 new Health Telemetry HA entities**: The C++ ESPHome firmware now publishes the following Home Assistant sensor entities directly, previously only visible via MQTT JSON or the Python Digital Twin:
+  - `sensor.hapsic_health_chi_instant` — real-time χ ratio (actual vs theoretical steam output)
+  - `sensor.hapsic_health_effective_max` — current effective max capacity after limiter degradation
+  - `sensor.hapsic_health_measured_steam` — measured steam output in lbs/hr
+  - `text_sensor.hapsic_health_boil_status` — COLD/BOILING boiler state
+- **Expanded MQTT health telemetry payload**: The `health` block in the JSON telemetry now includes `boil_status`, `effective_max_capacity`, `measured_steam_lbs_hr`, `boiler_curve`, and `boiler_curve_samples`, bringing C++ firmware MQTT parity with the Python Digital Twin.
+- **Mission Control dashboard — Boiler Health & Characterization section**: New section between Canister Health and Physics Engine:
+  - Measured Steam / Effective Max / Boiler State tile row with dynamic color coding
+  - Boiler Curve (Learned) markdown table with ASCII bar histogram across 4 voltage bins
+  - Canister Health (χ Ratio) ApexChart plotting χ instant and 48h EMA on a 12-hour window
+
+### Architecture
+- C++ firmware telemetry now matches Python Digital Twin MQTT health schema exactly — all health fields are published by both runtimes.
+
 ## [v2.4.0] — 2026-04-07
 
 ### Added
