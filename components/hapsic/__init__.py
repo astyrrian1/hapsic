@@ -65,6 +65,9 @@ TELEMETRY_SENSORS = [
     "tel_io_volts_out",
     "tel_io_steam_mass_lbs",
     "tel_health_chi_ema",
+    "tel_health_chi_instant",
+    "tel_health_effective_max",
+    "tel_health_measured_steam",
 ]
 
 TELEMETRY_BINARY_SENSORS = [
@@ -75,6 +78,7 @@ TELEMETRY_BINARY_SENSORS = [
 
 TELEMETRY_TEXT_SENSORS = [
     "tel_limiters_active_limit",
+    "tel_health_boil_status",
 ]
 
 CONFIG_SCHEMA = (
