@@ -1177,6 +1177,14 @@ void HapsicController::publish_telemetry() {
     tel_io_steam_mass_lbs_->publish_state(steam_mass_kg_hr_ * 2.20462f);
   if (tel_health_chi_ema_)
     tel_health_chi_ema_->publish_state(chi_ema_);
+  if (tel_health_chi_instant_)
+    tel_health_chi_instant_->publish_state(chi_instant_);
+  if (tel_health_effective_max_)
+    tel_health_effective_max_->publish_state(get_effective_max_capacity());
+  if (tel_health_measured_steam_)
+    tel_health_measured_steam_->publish_state(last_measured_steam_);
+  if (tel_health_boil_status_)
+    tel_health_boil_status_->publish_state(boil_status_);
 
   if (tel_feasibility_is_infeasible_)
     tel_feasibility_is_infeasible_->publish_state(is_target_infeasible_);
@@ -1207,14 +1215,21 @@ void HapsicController::publish_telemetry() {
            "\"psychrometrics\":{\"pre_steam_dp\":%.2f,\"outdoor_dp\":%.2f,"
            "\"duct_rh_ema\":%.2f},"
            "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
-           "\"health\":{\"chi_ratio\":%.4f,\"chi_ema\":%.4f}"
+           "\"health\":{\"chi_ratio\":%.4f,\"chi_ema\":%.4f,"
+           "\"boil_status\":\"%s\",\"effective_max_capacity\":%.3f,"
+           "\"measured_steam_lbs_hr\":%.3f,"
+           "\"boiler_curve\":[%.3f,%.3f,%.3f,%.3f],"
+           "\"boiler_curve_samples\":[%d,%d,%d,%d]}"
            "}",
            state_name(fsm_state_), fault_reason_.c_str(), max_achievable_dp_, is_target_infeasible_ ? "true" : "false",
            total_loss_cfm_, target_room_dp_, room_dp_, loop_a_error, loop_a_p_term, loop_a_i_term, integrator_a_,
            "false", target_duct_dp_, target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term, loop_b_i_term,
            integrator_b_, "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
            stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), duct_derivative_,
-           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_, 1.0f, chi_ema_);
+           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_, 1.0f, chi_ema_,
+           boil_status_.c_str(), get_effective_max_capacity(), last_measured_steam_, boiler_curve_[0], boiler_curve_[1],
+           boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
+           boiler_curve_counts_[2], boiler_curve_counts_[3]);
 
 #ifdef USE_MQTT
   if (mqtt::global_mqtt_client != nullptr) {

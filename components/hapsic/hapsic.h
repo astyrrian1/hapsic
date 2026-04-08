@@ -220,6 +220,10 @@ class HapsicController : public PollingComponent {
   void set_tel_io_volts_out(sensor::Sensor *s) { tel_io_volts_out_ = s; }
   void set_tel_io_steam_mass_lbs(sensor::Sensor *s) { tel_io_steam_mass_lbs_ = s; }
   void set_tel_health_chi_ema(sensor::Sensor *s) { tel_health_chi_ema_ = s; }
+  void set_tel_health_chi_instant(sensor::Sensor *s) { tel_health_chi_instant_ = s; }
+  void set_tel_health_effective_max(sensor::Sensor *s) { tel_health_effective_max_ = s; }
+  void set_tel_health_measured_steam(sensor::Sensor *s) { tel_health_measured_steam_ = s; }
+  void set_tel_health_boil_status(text_sensor::TextSensor *s) { tel_health_boil_status_ = s; }
 
   void set_tel_feasibility_is_infeasible(binary_sensor::BinarySensor *s) { tel_feasibility_is_infeasible_ = s; }
   void set_tel_batch_boil_achieved(binary_sensor::BinarySensor *s) { tel_batch_boil_achieved_ = s; }
@@ -470,12 +474,16 @@ class HapsicController : public PollingComponent {
   sensor::Sensor *tel_io_volts_out_ = nullptr;
   sensor::Sensor *tel_io_steam_mass_lbs_ = nullptr;
   sensor::Sensor *tel_health_chi_ema_ = nullptr;
+  sensor::Sensor *tel_health_chi_instant_ = nullptr;
+  sensor::Sensor *tel_health_effective_max_ = nullptr;
+  sensor::Sensor *tel_health_measured_steam_ = nullptr;
 
   binary_sensor::BinarySensor *tel_feasibility_is_infeasible_ = nullptr;
   binary_sensor::BinarySensor *tel_batch_boil_achieved_ = nullptr;
   binary_sensor::BinarySensor *tel_batch_stasis_active_ = nullptr;
 
   text_sensor::TextSensor *tel_limiters_active_limit_ = nullptr;
+  text_sensor::TextSensor *tel_health_boil_status_ = nullptr;
 
   // =========================================================================
   // PRIVATE METHODS (implemented in hapsic.cpp)
