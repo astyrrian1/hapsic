@@ -3,6 +3,24 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.5.1] — 2026-04-12
+
+### Changed
+- **MQTT broker migration**: Migrated to standalone MQTT broker. Affects ESPHome firmware secrets and dev audit scripts only.
+- **secrets.yaml.example**: Updated with clearer placeholder and added documentation clarifying that the Python Digital Twin uses the AppDaemon plugin layer (HA's `mqtt.publish` service) — the broker address for the Digital Twin is configured in `appdaemon.yaml` on the HA server, not in HAPSIC secrets.
+
+### Architecture
+- **Confirmed: Python Digital Twin already uses AppDaemon plugin approach** — `hapsic_controller.py` calls `self.call_service("mqtt/publish", ...)` which routes through AppDaemon's HASS plugin to HA's MQTT integration. No direct `paho-mqtt` connection. The broker address for the Digital Twin is configured in AppDaemon's `appdaemon.yaml` MQTT plugin section, not in the HAPSIC codebase.
+
+### Deployment Notes
+After merging this release:
+1. Update `secrets.yaml` on your ESPHome build machine with `mqtt_broker` set to your new broker IP
+2. Reflash the StamPLC firmware (`stamplc.yaml`) to pick up the new broker
+3. Update AppDaemon's `appdaemon.yaml` on the HA server: set `client_host` to the new broker IP in the MQTT plugin section
+4. Restart the AppDaemon add-on (Settings → Add-ons → AppDaemon → Restart)
+5. If the new broker requires authentication, update `client_user` and `client_password` in `appdaemon.yaml`
+
+
 ## [v2.5.0] — 2026-04-08
 
 ### Added
