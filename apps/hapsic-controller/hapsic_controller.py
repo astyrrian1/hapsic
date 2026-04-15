@@ -69,6 +69,7 @@ class HapsicController(hass.Hass):
         self.supply_rh = 0.0
         self.supply_w = 0.0
         self.supply_dp = 0.0
+        self.duct_dp = 0.0
         self.duct_w = 0.0
         self.bypass_state = 0.0
         self.last_valid_room_dp_time = 0
@@ -298,9 +299,9 @@ class HapsicController(hass.Hass):
                     )
                     return False
 
-            # --- Supply / Pre-Steam (CAN) ---
-            s_t = self.get_state("sensor.hapsic_pre_steam_temp")
-            s_rh = self.get_state("sensor.hapsic_pre_steam_rh")
+            # --- Supply / Pre-Steam (CLEANSED) ---
+            s_t = self.get_state("sensor.hapsic_cleansed_supply_temp")
+            s_rh = self.get_state("sensor.hapsic_cleansed_supply_rh")
 
             effective_sup_t, effective_sup_rh = safe_parse(s_t, s_rh)
 
@@ -1015,7 +1016,7 @@ class HapsicController(hass.Hass):
                 "room_dp": round(self.room_dp, 2) if hasattr(self, 'room_dp') else 0.0,
                 "room_avg_rh": round(self.room_rh_avg, 2) if hasattr(self, 'room_rh_avg') else 0.0,
                 "room_avg_temp": round(self.room_temp_avg, 1) if hasattr(self, 'room_temp_avg') else 0.0,
-                "pre_steam_dp": round(self.supply_dp, 2) if hasattr(self, 'pre_steam_dp') else 0.0,
+                "pre_steam_dp": round(self.supply_dp, 2) if hasattr(self, 'supply_dp') else 0.0,
                 "post_steam_dp": round(self.duct_dp, 2) if hasattr(self, 'duct_dp') else 0.0,
                 "outdoor_dp": round(self.outdoor_dp, 2),
                 "bypass_state": self.bypass_state

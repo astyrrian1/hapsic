@@ -3,7 +3,14 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
-## [v2.5.1] — 2026-04-12
+## [v2.5.2] — 2026-04-15
+6: 
+7: ### Fixed
+8: - **Outdoor DP 0.0°F reporting**: Fixed attribute typos in the Python Digital Twin's telemetry logic (`hasattr` was checking for `pre_steam_dp` instead of `supply_dp`).
+9: - **Outdated sensor references**: Updated `hapsic_controller.py` to use `sensor.hapsic_cleansed_supply_temp/rh` ensuring more reliable supply data and resolving `unknown` states from raw CAN sensors.
+10: 
+11: 
+12: ## [v2.5.1] — 2026-04-12
 
 ### Changed
 - **MQTT broker migration**: Migrated to standalone MQTT broker. Affects ESPHome firmware secrets and dev audit scripts only.

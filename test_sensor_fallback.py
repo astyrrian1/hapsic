@@ -105,8 +105,8 @@ BASE_STATES = {
     "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature": 59.0,
     "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity": 50.0,
     "sensor.zehnder_comfoair_q_a4cb9c_bypass_state": 0.0,
-    "sensor.hapsic_pre_steam_temp": 68.0,
-    "sensor.hapsic_pre_steam_rh": 30.0,
+    "sensor.hapsic_cleansed_supply_temp": 68.0,
+    "sensor.hapsic_cleansed_supply_rh": 30.0,
     "sensor.hapsic_room_average_temp": 68.0,
     "sensor.hapsic_room_average_rh": 30.0,
     "sensor.hapsic_cleansed_inside_temp": 68.0,
@@ -125,8 +125,8 @@ ARGS = {
     "bypass": "sensor.zehnder_comfoair_q_a4cb9c_bypass_state",
     "outdoor_temp": "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature",
     "outdoor_rh": "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity",
-    "pre_steam_temp": "sensor.hapsic_pre_steam_temp",
-    "pre_steam_rh": "sensor.hapsic_pre_steam_rh",
+    "pre_steam_temp": "sensor.hapsic_cleansed_supply_temp",
+    "pre_steam_rh": "sensor.hapsic_cleansed_supply_rh",
     "extract_avg_temp": "sensor.hapsic_room_average_temp",
     "extract_avg_rh": "sensor.hapsic_room_average_rh",
     "steam_dac": "output.steam_dac",
@@ -231,8 +231,8 @@ def test_supply_sensor_failure():
     tick(c, 5)  # Build up valid cache
 
     # Kill supply sensors
-    c.states["sensor.hapsic_pre_steam_temp"] = None
-    c.states["sensor.hapsic_pre_steam_rh"] = None
+    c.states["sensor.hapsic_cleansed_supply_temp"] = None
+    c.states["sensor.hapsic_cleansed_supply_rh"] = None
 
     # Within cache window (30 min), should use cached value
     tick(c, 5)

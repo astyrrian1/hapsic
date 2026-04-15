@@ -71,8 +71,8 @@ def run_tests():
         "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity": 50.0,
 
         # Mapped from CSV
-        "sensor.hapsic_pre_steam_temp": 68.0,
-        "sensor.hapsic_pre_steam_rh": 30.0,
+        "sensor.hapsic_cleansed_supply_temp": 68.0,
+        "sensor.hapsic_cleansed_supply_rh": 30.0,
         "sensor.hapsic_room_average_temp": 68.0,
         "sensor.hapsic_room_average_rh": 30.0,
         "sensor.hapsic_cleansed_inside_temp": 68.0,
@@ -92,8 +92,8 @@ def run_tests():
         "bypass": "sensor.zehnder_comfoair_q_a4cb9c_bypass_state",
         "outdoor_temp": "sensor.outdoor_temp",
         "outdoor_rh": "sensor.outdoor_humidity",
-        "pre_steam_temp": "sensor.hapsic_pre_steam_temp",
-        "pre_steam_rh": "sensor.hapsic_pre_steam_rh",
+        "pre_steam_temp": "sensor.hapsic_cleansed_supply_temp",
+        "pre_steam_rh": "sensor.hapsic_cleansed_supply_rh",
         "extract_avg_temp": "sensor.hapsic_round_room_temp",
         "extract_avg_rh": "sensor.hapsic_round_room_rh",
         "steam_dac": "output.steam_dac",
@@ -135,8 +135,8 @@ def run_tests():
     for idx, ts in enumerate(sorted_times):
         updates = timeline[ts]
         for k, v in updates.items():
-            if k == 'sim_extract_temp': controller.states['sensor.hapsic_pre_steam_temp'] = v
-            if k == 'sim_extract_rh': controller.states['sensor.hapsic_pre_steam_rh'] = v
+            if k == 'sim_extract_temp': controller.states['sensor.hapsic_cleansed_supply_temp'] = v
+            if k == 'sim_extract_rh': controller.states['sensor.hapsic_cleansed_supply_rh'] = v
             if k == 'sim_avg_temp':
                 controller.states['sensor.hapsic_room_average_temp'] = v
                 controller.states['sensor.hapsic_cleansed_inside_temp'] = v

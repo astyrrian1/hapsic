@@ -184,9 +184,9 @@ cards:
             name: Actual Temp
           - entity: sensor.hapsic_room_average_rh
             name: Actual RH
-          - entity: sensor.hapsic_pre_steam_temp
+          - entity: sensor.hapsic_cleansed_supply_temp
             name: Supply Temp (T_sup)
-          - entity: sensor.hapsic_pre_steam_rh
+          - entity: sensor.hapsic_cleansed_supply_rh
             name: Supply RH (Baseline)
           - entity: sensor.hapsic_supply_flow
             name: Airflow Mass (m3/h)
@@ -202,10 +202,10 @@ cards:
             title: Pre-Steam (Supply)
             show_header_toggle: false
             entities:
-              - entity: sensor.hapsic_pre_steam_temp
+              - entity: sensor.hapsic_cleansed_supply_temp
                 name: Temp
                 icon: mdi:thermometer-chevron-down
-              - entity: sensor.hapsic_pre_steam_rh
+              - entity: sensor.hapsic_cleansed_supply_rh
                 name: Humidity
                 icon: mdi:water-minus
           - type: entities
