@@ -55,8 +55,8 @@ Production sensors with designated primary/fallback roles:
 |---|---|---|
 | Room Temp | `sensor.hapsic_room_average_temp` (°F) | Zehnder Extract CAN |
 | Room RH | `sensor.hapsic_room_average_rh` | Zehnder Extract CAN |
-| Pre-Steam Temp | `sensor.hapsic_pre_steam_temp` (°F) | *(backup only)* |
-| Pre-Steam RH | `sensor.hapsic_pre_steam_rh` | *(backup only)* |
+| Pre-Steam Temp | `sensor.hapsic_cleansed_supply_temp` (°F) | *(primary)* |
+| Pre-Steam RH   | `sensor.hapsic_cleansed_supply_rh` | *(primary)* |
 | Target DP | `input_number.target_dew_point` (°F) | — |
 | Max Capacity | `input_number.humidifier_max_capacity` (lbs/hr, default 2.7) | — |
 | Supply Flow | `sensor.hapsic_supply_flow` (m³/h, fallback) | — |

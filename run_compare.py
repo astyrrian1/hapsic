@@ -64,8 +64,8 @@ def run_comparison():
         "input_number.target_dew_point": 50.0,
 
         # Mapped from CSV
-        "sensor.hapsic_pre_steam_temp": 68.0,
-        "sensor.hapsic_pre_steam_rh": 30.0,
+        "sensor.hapsic_cleansed_supply_temp": 68.0,
+        "sensor.hapsic_cleansed_supply_rh": 30.0,
         "sensor.hapsic_room_average_temp": 68.0,
         "sensor.hapsic_room_average_rh": 30.0,
         "sensor.hapsic_cleansed_inside_temp": 68.0,
