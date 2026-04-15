@@ -10,7 +10,7 @@ class HapsicController(hass.Hass):
 
     def initialize(self):
         """
-        HAPSIC 2.3.0
+        HAPSIC 2.5.2
         Includes:
         1. Absolute Dew Point Setpoint Paradigm.
         2. Real-time Building Physics Mass Balance (1380 CFM50 / 17.0 N-Factor).
