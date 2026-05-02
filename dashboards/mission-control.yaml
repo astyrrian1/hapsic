@@ -29,9 +29,11 @@ cards:
                 **Reason:** {{ states('sensor.hapsic_fault_reason') }}
       - type: conditional
         conditions:
-          - entity: sensor.hapsic_fsm_state
+          - condition: state
+            entity: sensor.hapsic_fsm_state
             state: FAULT
-          - entity: sensor.hapsic_fault_reason
+          - condition: state
+            entity: sensor.hapsic_fault_reason
             state: Economizer Bypass Active
         card:
           type: tile

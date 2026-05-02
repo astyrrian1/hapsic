@@ -3,6 +3,11 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.6.1] — 2026-05-02
+
+### Fixed
+- **Dashboard syntax error**: Fixed invalid YAML syntax in the `conditional` card for the Economizer Bypass Active tile in `dashboards/mission-control.yaml`. Modern Home Assistant requires explicit `condition: state` keys, which caused the entire dashboard to fail to render and appear 'missing'.
+
 ## [v2.6.0] — 2026-05-02
 
 ### Added
