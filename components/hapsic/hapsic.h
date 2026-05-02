@@ -223,6 +223,7 @@ class HapsicController : public PollingComponent {
   void set_tel_health_chi_instant(sensor::Sensor *s) { tel_health_chi_instant_ = s; }
   void set_tel_health_effective_max(sensor::Sensor *s) { tel_health_effective_max_ = s; }
   void set_tel_health_measured_steam(sensor::Sensor *s) { tel_health_measured_steam_ = s; }
+  void set_tel_health_production_efficiency(sensor::Sensor *s) { tel_health_production_efficiency_ = s; }
   void set_tel_health_boil_status(text_sensor::TextSensor *s) { tel_health_boil_status_ = s; }
 
   void set_tel_feasibility_is_infeasible(binary_sensor::BinarySensor *s) { tel_feasibility_is_infeasible_ = s; }
@@ -477,6 +478,7 @@ class HapsicController : public PollingComponent {
   sensor::Sensor *tel_health_chi_instant_ = nullptr;
   sensor::Sensor *tel_health_effective_max_ = nullptr;
   sensor::Sensor *tel_health_measured_steam_ = nullptr;
+  sensor::Sensor *tel_health_production_efficiency_ = nullptr;
 
   binary_sensor::BinarySensor *tel_feasibility_is_infeasible_ = nullptr;
   binary_sensor::BinarySensor *tel_batch_boil_achieved_ = nullptr;

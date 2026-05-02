@@ -519,6 +519,8 @@ hapsic:
     name: "HAPSIC Health Effective Max"
   tel_health_measured_steam:
     name: "HAPSIC Health Measured Steam"
+  tel_health_production_efficiency:
+    name: "HAPSIC Health Production Efficiency"
   tel_feasibility_is_infeasible:
     name: "HAPSIC Feasibility Is Infeasible"
   tel_batch_boil_achieved:

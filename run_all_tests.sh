@@ -81,6 +81,10 @@ echo "=== 13. System Tests — Offline Cross-Platform Parity ==="
 python3 test_offline_parity.py
 echo "✓ Python/C++ offline parity validated."
 
+echo "=== 14. System Tests — Telemetry Integrity ==="
+python3 test_telemetry_integrity.py
+echo "✓ Telemetry reporting layer validated."
+
 echo "========================================="
 echo "✅ ALL CI PIPELINE TESTS COMPLETED AND PASSED."
 echo "========================================="
