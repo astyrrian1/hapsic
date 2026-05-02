@@ -598,6 +598,8 @@ hapsic:
     name: "HAPSIC Health Effective Max (Desk Mode)"
   tel_health_measured_steam:
     name: "HAPSIC Health Measured Steam (Desk Mode)"
+  tel_health_production_efficiency:
+    name: "HAPSIC Health Production Efficiency (Desk Mode)"
   tel_feasibility_is_infeasible:
     name: "HAPSIC Feasibility Is Infeasible (Desk Mode)"
   tel_batch_boil_achieved:

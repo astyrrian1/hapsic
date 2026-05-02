@@ -1183,6 +1183,12 @@ void HapsicController::publish_telemetry() {
     tel_health_effective_max_->publish_state(get_effective_max_capacity());
   if (tel_health_measured_steam_)
     tel_health_measured_steam_->publish_state(last_measured_steam_);
+  if (tel_health_production_efficiency_) {
+    float eff = 0.0f;
+    if (steam_mass_kg_hr_ > 0.1f && last_measured_steam_ > 0.0f)
+      eff = (last_measured_steam_ / steam_mass_kg_hr_) * 100.0f;
+    tel_health_production_efficiency_->publish_state(eff);
+  }
   if (tel_health_boil_status_)
     tel_health_boil_status_->publish_state(boil_status_);
 
@@ -1195,6 +1201,10 @@ void HapsicController::publish_telemetry() {
 
   if (tel_limiters_active_limit_)
     tel_limiters_active_limit_->publish_state(active_limit_);
+
+  float prod_eff = 0.0f;
+  if (steam_mass_kg_hr_ > 0.1f && last_measured_steam_ > 0.0f)
+    prod_eff = (last_measured_steam_ / steam_mass_kg_hr_) * 100.0f;
 
   char json[2048];
   snprintf(json, sizeof(json),
@@ -1217,7 +1227,7 @@ void HapsicController::publish_telemetry() {
            "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
            "\"health\":{\"chi_ratio\":%.4f,\"chi_ema\":%.4f,"
            "\"boil_status\":\"%s\",\"effective_max_capacity\":%.3f,"
-           "\"measured_steam_lbs_hr\":%.3f,"
+           "\"measured_steam_lbs_hr\":%.3f,\"production_efficiency\":%.1f,"
            "\"boiler_curve\":[%.3f,%.3f,%.3f,%.3f],"
            "\"boiler_curve_samples\":[%d,%d,%d,%d]}"
            "}",
@@ -1227,8 +1237,8 @@ void HapsicController::publish_telemetry() {
            integrator_b_, "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
            stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), duct_derivative_,
            structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_, 1.0f, chi_ema_,
-           boil_status_.c_str(), get_effective_max_capacity(), last_measured_steam_, boiler_curve_[0], boiler_curve_[1],
-           boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
+           boil_status_.c_str(), get_effective_max_capacity(), last_measured_steam_, prod_eff, boiler_curve_[0],
+           boiler_curve_[1], boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
            boiler_curve_counts_[2], boiler_curve_counts_[3]);
 
 #ifdef USE_MQTT

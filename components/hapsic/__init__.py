@@ -68,6 +68,7 @@ TELEMETRY_SENSORS = [
     "tel_health_chi_instant",
     "tel_health_effective_max",
     "tel_health_measured_steam",
+    "tel_health_production_efficiency",
 ]
 
 TELEMETRY_BINARY_SENSORS = [

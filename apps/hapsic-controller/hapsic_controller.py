@@ -1036,7 +1036,12 @@ class HapsicController(hass.Hass):
                 "boiler_curve": [round(v, 3) for v in self.boiler_curve],
                 "boiler_curve_samples": list(self.boiler_curve_counts),
                 "effective_max_capacity": round(self.get_effective_max_capacity(), 3),
-                "measured_steam_lbs_hr": round(getattr(self, '_last_measured_steam', 0.0), 3)
+                "measured_steam_lbs_hr": round(getattr(self, '_last_measured_steam', 0.0), 3),
+                "production_efficiency": round(
+                    (self._last_measured_steam / self.calc_steam_mass * 100.0)
+                    if self.calc_steam_mass > 0.1 and getattr(self, '_last_measured_steam', 0.0) > 0.0
+                    else 0.0, 1
+                )
             }
         }
 
