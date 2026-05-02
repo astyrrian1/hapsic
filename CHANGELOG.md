@@ -3,6 +3,27 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [v2.6.0] — 2026-05-02
+
+### Added
+- **Production Efficiency sensor** (`tel_health_production_efficiency`): Reports the ratio of psychrometrically-measured steam output to commanded steam output as a percentage. Gated to report 0% when the boiler is cold or commanded steam is below 0.1 lbs/hr to avoid noise and divide-by-zero.
+- **Steam Comparison dashboard**: Replaced the misleading "Measured Steam" tile in Mission Control with a 4-tile header (Commanded Steam, Actual Steam, Efficiency %, Boiler State) and two new ApexCharts — a 12-hour Commanded vs Actual overlay and a color-thresholded Production Efficiency trend.
+- **Telemetry Integrity test** (`test_telemetry_integrity.py`): New CI step (#14) that validates the full MQTT JSON payload schema against the controller's internal state, catching silent fallbacks and typo-induced zero-fills. Covers psychrometrics, process, health (including new `production_efficiency` and `measured_steam_lbs_hr` fields), physics, and IO blocks.
+
+### Changed
+- **MQTT JSON payload**: `health` block now includes `measured_steam_lbs_hr` (float) and `production_efficiency` (float, 0–100) fields in both C++ firmware and Python Digital Twin.
+- **C++ firmware**: Pre-computes efficiency into a local variable before the `snprintf` call to satisfy `clang-format` line-length requirements.
+
+### Architecture
+- **Full parity maintained**: All changes applied across C++ firmware (`hapsic.h`, `hapsic.cpp`), Python Digital Twin (`hapsic_controller.py`), ESPHome codegen (`__init__.py`), and both production/desk YAML configs. The telemetry integrity test validates cross-layer consistency.
+
+### Deployment Notes
+After installing this release via HACS:
+1. Restart AppDaemon to load the updated Python controller
+2. Flash firmware to the StamPLC unit(s) to enable the new MQTT fields
+3. Register the HA MQTT sensors (`sensor.hapsic_health_measured_steam`, `sensor.hapsic_health_production_efficiency`) in `hapsic_sensors.yaml` if not already done
+4. The Mission Control dashboard will auto-populate once both the controller and firmware are running
+
 ## [v2.5.2] — 2026-04-15
 
 ### Fixed
