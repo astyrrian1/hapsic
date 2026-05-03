@@ -3,6 +3,15 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Mission Control dashboard load failure**: Wrapped `dashboards/mission-control.yaml` as a full Lovelace dashboard config with `views:` so it can be pasted directly into Home Assistant's raw configuration editor as documented.
+- **Panel view card count**: Moved the History graph into the main vertical stack so the panel view has exactly one card, matching current Home Assistant panel view requirements.
+- **Boiler curve rendering**: Added a safe JSON fallback for `input_text.hapsic_boiler_curve` so an empty or invalid helper value cannot break the markdown card.
+- **Structure Velocity chart**: Kept the dashboard on the intended stable `sensor.hapsic_structure_velocity` MQTT contract; the missing entity must be provided by the Home Assistant `hapsic_sensors.yaml` package.
+- **Open-source dashboard privacy**: Removed site-specific text and external deployment entities from `dashboards/mission-control.yaml`; the public dashboard now uses only the generic HAPSIC entity contract.
+
 ## [v2.6.1] — 2026-05-02
 
 ### Fixed

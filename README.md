@@ -25,7 +25,7 @@ HAPSIC solves this with math.
 
 ## Dashboard
 
-HAPSIC ships with a **Mission Control** dashboard for monitoring the physics engine, duct safety, and moisture balance in real time.
+HAPSIC ships with a generic **Mission Control** dashboard for monitoring the physics engine, duct safety, and moisture balance in real time. It uses only HAPSIC contract entities and intentionally excludes site-specific sensors, locations, rooms, vendors, and personal Home Assistant helpers.
 
 **Prerequisites** (install via HACS → Frontend):
 - [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom)
@@ -38,6 +38,15 @@ HAPSIC ships with a **Mission Control** dashboard for monitoring the physics eng
 2. Open the new dashboard, click **⋮** → **Edit Dashboard** → **⋮** → **Raw configuration editor**
 3. Paste the contents of [`dashboards/mission-control.yaml`](dashboards/mission-control.yaml)
 4. Save
+
+Personal production dashboards should live in your own Home Assistant config repository. Keep local-only entities, room names, vendor hardware, and location-specific context out of this open-source dashboard.
+
+**Dashboard entity contract:**
+- State and faults: `sensor.hapsic_fsm_state`, `sensor.hapsic_fault_reason`, `sensor.hapsic_boil_status`
+- User inputs/storage: `input_number.target_dew_point`, `input_number.humidifier_max_capacity`, `input_number.hapsic_chi_ema`, `input_text.hapsic_boiler_curve`
+- Physics and control: `sensor.hapsic_steam_voltage`, `sensor.hapsic_steam_mass`, `sensor.hapsic_ventilation_loss`, `sensor.hapsic_net_flux`, `sensor.hapsic_structure_velocity`, `sensor.hapsic_room_deficit`, `sensor.hapsic_target_duct_dp`, `sensor.hapsic_max_achievable_dp`, `sensor.hapsic_is_target_infeasible`
+- Psychrometrics and duct safety: `sensor.hapsic_room_dew_point`, `sensor.hapsic_room_average_temp`, `sensor.hapsic_room_average_rh`, `sensor.hapsic_pre_steam_dp`, `sensor.hapsic_duct_dp`, `sensor.hapsic_cleansed_supply_temp`, `sensor.hapsic_cleansed_supply_rh`, `sensor.hapsic_cleansed_post_steam_temp`, `sensor.hapsic_cleansed_post_steam_rh`, `sensor.hapsic_supply_flow`, `sensor.hapsic_cleansed_airflow`
+- Health: `sensor.hapsic_chi_instant`, `sensor.hapsic_health_measured_steam`, `sensor.hapsic_health_production_efficiency`
 
 ## Notification Blueprints
 
