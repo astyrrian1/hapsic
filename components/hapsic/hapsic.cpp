@@ -300,6 +300,7 @@ void HapsicController::update() {
 
   write_output();
   run_diagnostics();
+  update_economy_advisory();
   publish_telemetry();
 }
 
@@ -1030,6 +1031,56 @@ void HapsicController::run_diagnostics() {
   }
 }
 
+void HapsicController::update_economy_advisory() {
+  bool active_steam = fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO || fsm_state_ == TURBO_PENDING ||
+                      steam_voltage_ > 0.1f || steam_mass_kg_hr_ > 0.05f;
+  float room_deficit = target_room_dp_ - room_dp_;
+  bool useful_demand = room_deficit > 0.2f;
+  economy_steaming_active_ = active_steam;
+  economy_useful_demand_ = useful_demand;
+  bool negative_net = net_flux_ <= 0.0f;
+  bool severe_negative_net = net_flux_ <= -0.5f;
+  bool recovering = net_flux_ > 0.25f;
+
+  if (active_steam && useful_demand && negative_net) {
+    economy_negative_streak_sec_ += dt_;
+  } else {
+    economy_negative_streak_sec_ = 0.0f;
+  }
+
+  if (active_steam && useful_demand && severe_negative_net) {
+    economy_severe_streak_sec_ += dt_;
+  } else {
+    economy_severe_streak_sec_ = 0.0f;
+  }
+
+  if (active_steam && recovering) {
+    economy_recovery_streak_sec_ += dt_;
+  } else {
+    economy_recovery_streak_sec_ = 0.0f;
+  }
+
+  economy_advisory_active_ = economy_negative_streak_sec_ >= 900.0f;
+  economy_advisory_severe_ = economy_severe_streak_sec_ >= 900.0f;
+
+  if (economy_advisory_severe_) {
+    economy_advisory_reason_ = "SEVERE_NEGATIVE_NET_FLUX";
+    economy_advisory_target_delta_ = -1.0f;
+  } else if (economy_advisory_active_) {
+    economy_advisory_reason_ = "NEGATIVE_NET_FLUX";
+    economy_advisory_target_delta_ = -0.5f;
+  } else if (economy_negative_streak_sec_ > 0.0f) {
+    economy_advisory_reason_ = "EVALUATING_NEGATIVE_NET_FLUX";
+    economy_advisory_target_delta_ = 0.0f;
+  } else if (economy_recovery_streak_sec_ >= 900.0f) {
+    economy_advisory_reason_ = "RECOVERED";
+    economy_advisory_target_delta_ = 0.0f;
+  } else {
+    economy_advisory_reason_ = "CLEAR";
+    economy_advisory_target_delta_ = 0.0f;
+  }
+}
+
 // =============================================================================
 // BOILER CHARACTERIZATION — helpers
 // =============================================================================
@@ -1206,7 +1257,7 @@ void HapsicController::publish_telemetry() {
   if (steam_mass_kg_hr_ > 0.1f && last_measured_steam_ > 0.0f)
     prod_eff = (last_measured_steam_ / steam_mass_kg_hr_) * 100.0f;
 
-  char json[2048];
+  char json[2560];
   snprintf(json, sizeof(json),
            "{"
            "\"fsm\":{\"state\":\"%s\",\"fault_reason\":\"%s\"},"
@@ -1225,6 +1276,11 @@ void HapsicController::publish_telemetry() {
            "\"psychrometrics\":{\"pre_steam_dp\":%.2f,\"outdoor_dp\":%.2f,"
            "\"duct_rh_ema\":%.2f},"
            "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
+           "\"advisory\":{\"economy_active\":%s,\"economy_severe\":%s,"
+           "\"steaming_active\":%s,\"useful_demand\":%s,"
+           "\"economy_reason\":\"%s\",\"negative_net_minutes\":%.1f,"
+           "\"severe_negative_minutes\":%.1f,\"recovery_minutes\":%.1f,"
+           "\"suggested_target_delta\":%.1f},"
            "\"health\":{\"chi_ratio\":%.4f,\"chi_ema\":%.4f,"
            "\"boil_status\":\"%s\",\"effective_max_capacity\":%.3f,"
            "\"measured_steam_lbs_hr\":%.3f,\"production_efficiency\":%.1f,"
@@ -1236,9 +1292,13 @@ void HapsicController::publish_telemetry() {
            "false", target_duct_dp_, target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term, loop_b_i_term,
            integrator_b_, "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
            stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), duct_derivative_,
-           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_, 1.0f, chi_ema_,
-           boil_status_.c_str(), get_effective_max_capacity(), last_measured_steam_, prod_eff, boiler_curve_[0],
-           boiler_curve_[1], boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
+           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_,
+           economy_advisory_active_ ? "true" : "false", economy_advisory_severe_ ? "true" : "false",
+           economy_steaming_active_ ? "true" : "false", economy_useful_demand_ ? "true" : "false",
+           economy_advisory_reason_.c_str(), economy_negative_streak_sec_ / 60.0f, economy_severe_streak_sec_ / 60.0f,
+           economy_recovery_streak_sec_ / 60.0f, economy_advisory_target_delta_, 1.0f, chi_ema_, boil_status_.c_str(),
+           get_effective_max_capacity(), last_measured_steam_, prod_eff, boiler_curve_[0], boiler_curve_[1],
+           boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
            boiler_curve_counts_[2], boiler_curve_counts_[3]);
 
 #ifdef USE_MQTT
@@ -1263,10 +1323,12 @@ void HapsicController::publish_terminal_heartbeat() {
   ESP_LOGI("hapsic",
            "[HEARTBEAT] %s [Boil:%s|Stasis:%ds] | R_DP: %.1fC (SP:%.1fC, "
            "IntA:%.1f) | D_DP: %.1fC (SP:%.1fC, IntB:%.1f) | dDP/dt: %.1fC/m | "
-           "Lim: %s | Out: %.1fV [FF:%.1f|P:%.1f|I:%.1f]",
+           "Lim: %s | Out: %.1fV [FF:%.1f|P:%.1f|I:%.1f] | EcoAdv: %s neg=%.0fm severe=%.0fm delta=%.1fF",
            state_name(fsm_state_), boil_achieved_ ? "1" : "0", stasis_timer_sec_, room_dp_, target_room_dp_,
            integrator_a_, duct_dp_, target_duct_dp_, integrator_b_, duct_derivative_, active_limit_.c_str(),
-           steam_voltage_, v_ff_, loop_b_p_term, (ki_b_number_ ? ki_b_number_->state : 0.02f) * integrator_b_);
+           steam_voltage_, v_ff_, loop_b_p_term, (ki_b_number_ ? ki_b_number_->state : 0.02f) * integrator_b_,
+           economy_advisory_reason_.c_str(), economy_negative_streak_sec_ / 60.0f, economy_severe_streak_sec_ / 60.0f,
+           economy_advisory_target_delta_);
 }
 
 // =============================================================================

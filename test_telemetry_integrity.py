@@ -181,6 +181,21 @@ def test_telemetry_schema_integrity():
     if payload.get("physics", {}).get("flux_net") != 0.45:
         errors.append(f"  ❌ physics.flux_net: Expected 0.45, got {payload.get('physics', {}).get('flux_net')}")
 
+    # 5. ADVISORY (observe-only economy path)
+    advisory = payload.get("advisory", {})
+    advisory_checks = {
+        "economy_active": False,
+        "economy_severe": False,
+        "steaming_active": False,
+        "useful_demand": False,
+        "economy_reason": "CLEAR",
+        "suggested_target_delta": 0.0,
+    }
+    for key, expected in advisory_checks.items():
+        actual = advisory.get(key)
+        if actual != expected:
+            errors.append(f"  ❌ advisory.{key}: Expected {expected}, got {actual}")
+
     if errors:
         for err in errors:
             print(err)

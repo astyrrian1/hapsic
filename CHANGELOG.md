@@ -3,6 +3,36 @@
 All notable changes to the HAPSIC Controller are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [v2.7.0] — 2026-05-03
+
+### Added
+- **Economy advisory telemetry**: Added an observe-only supervisory layer that detects active humidification periods where `net_flux` stays negative despite useful room demand. The advisory never changes the target; it only publishes evaluation signals for later promotion.
+- **Heartbeat advisory logging**: Python Digital Twin and C++ firmware heartbeat logs now include the advisory reason, negative-net streak, severe-negative streak, and suggested target delta.
+- **MQTT advisory payload**: Added an `advisory` block to the Python and C++ telemetry JSON with `economy_active`, `economy_severe`, `steaming_active`, `useful_demand`, streak durations, recovery duration, reason, and suggested target delta.
+- **Manual HA package artifact**: Added `packages/hapsic_sensors.yaml` so the manually installed Home Assistant MQTT/history sensors have an upstream source in this repo.
+- **Mission Control promotion readout**: Added economy advisory tiles, a 7-day advisory trend, and a promotion gate based on advisory time as a share of steaming time.
+
+### Changed
+- **Telemetry integrity coverage**: Extended `test_telemetry_integrity.py` to verify the new `advisory` payload schema.
+- **Dashboard documentation**: Documented the companion `packages/hapsic_sensors.yaml` install artifact and expanded the dashboard entity contract.
+
+### Deployment Notes
+After installing this release via HACS:
+1. Restart AppDaemon to load the updated Python controller.
+2. Flash firmware to StamPLC unit(s) if using native ESPHome telemetry.
+3. Copy `packages/hapsic_sensors.yaml` into the Home Assistant `packages/` directory and restart Home Assistant Core so the MQTT/history sensors are created.
+4. Paste or update `dashboards/mission-control.yaml` in the Mission Control dashboard raw editor.
+5. Let the advisory run for 7 days before promoting it into target control. The dashboard marks promotion as a candidate only when there are at least 24 hours of steaming history and either advisory time is at least 25% of steaming time or severe advisory time reaches 4 hours.
+
+### Fixed
+- **Mission Control dashboard load failure**: Wrapped `dashboards/mission-control.yaml` as a full Lovelace dashboard config with `views:` so it can be pasted directly into Home Assistant's raw configuration editor as documented.
+- **Panel view card count**: Moved the History graph into the main vertical stack so the panel view has exactly one card, matching current Home Assistant panel view requirements.
+- **Boiler curve rendering**: Added a safe JSON fallback for `input_text.hapsic_boiler_curve` so an empty or invalid helper value cannot break the markdown card.
+- **Structure Velocity chart**: Kept the dashboard on the intended stable `sensor.hapsic_structure_velocity` MQTT contract; the missing entity must be provided by the Home Assistant `hapsic_sensors.yaml` package.
+- **Open-source dashboard privacy**: Removed site-specific text and external deployment entities from `dashboards/mission-control.yaml`; the public dashboard now uses only the generic HAPSIC entity contract.
+
 ## [v2.6.1] — 2026-05-02
 
 ### Fixed

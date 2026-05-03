@@ -380,6 +380,17 @@ class HapsicController : public PollingComponent {
   float v_ff_ = 0.0f;
   float last_measured_steam_ = 0.0f;
 
+  // Economy advisory (observe-only; never changes target)
+  float economy_negative_streak_sec_ = 0.0f;
+  float economy_severe_streak_sec_ = 0.0f;
+  float economy_recovery_streak_sec_ = 0.0f;
+  bool economy_advisory_active_ = false;
+  bool economy_advisory_severe_ = false;
+  bool economy_steaming_active_ = false;
+  bool economy_useful_demand_ = false;
+  float economy_advisory_target_delta_ = 0.0f;
+  std::string economy_advisory_reason_ = "CLEAR";
+
   // Boiler characterization curve (4 bins: [2-4V), [4-6V), [6-8V), [8-10V])
   static constexpr int BOILER_CURVE_BINS = 4;
   static constexpr float BOILER_CURVE_V_MIN = 2.0f;
@@ -503,6 +514,7 @@ class HapsicController : public PollingComponent {
   void execute_loop_b();
   void write_output();
   void run_diagnostics();
+  void update_economy_advisory();
   void publish_telemetry();
   void update_display();
   void update_buttons();
