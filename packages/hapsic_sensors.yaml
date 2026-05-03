@@ -1,0 +1,313 @@
+# /config/packages/hapsic_sensors.yaml
+# HAPSIC proxy sensors: stable entity contract for AppDaemon
+# and averaged indoor climate sensors.
+
+template:
+  - sensor:
+      # --- Room Proxy Sensors (stable IDs for AppDaemon) ---
+      - name: "HAPSIC Round Room Temp"
+        unique_id: hapsic_round_room_t
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.round_room_awair_temperature') }}"
+        availability: "{{ states('sensor.round_room_awair_temperature') | is_number }}"
+
+      - name: "HAPSIC Round Room RH"
+        unique_id: hapsic_round_room_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: "{{ states('sensor.round_room_awair_humidity') }}"
+        availability: "{{ states('sensor.round_room_awair_humidity') | is_number }}"
+
+      - name: "HAPSIC Kitchen Temp"
+        unique_id: hapsic_kitchen_t
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.kitchen_awair_temperature') }}"
+        availability: "{{ states('sensor.kitchen_awair_temperature') | is_number }}"
+
+      - name: "HAPSIC Kitchen RH"
+        unique_id: hapsic_kitchen_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: "{{ states('sensor.kitchen_awair_humidity') }}"
+        availability: "{{ states('sensor.kitchen_awair_humidity') | is_number }}"
+
+      - name: "HAPSIC Element Temp"
+        unique_id: hapsic_element_t
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.awair_element_7256_temperature') }}"
+        availability: "{{ states('sensor.awair_element_7256_temperature') | is_number }}"
+
+      - name: "HAPSIC Element RH"
+        unique_id: hapsic_element_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: "{{ states('sensor.awair_element_7256_humidity') }}"
+        availability: "{{ states('sensor.awair_element_7256_humidity') | is_number }}"
+
+      # --- Zehnder ComfoAirQ Proxy Sensors ---
+      - name: "HAPSIC Zehnder Supply Temp"
+        unique_id: hapsic_zehnder_supply_t
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_supply_air_temperature') }}"
+        availability: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_supply_air_temperature') | is_number }}"
+
+      - name: "HAPSIC Zehnder Supply RH"
+        unique_id: hapsic_zehnder_supply_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_supply_air_humidity') }}"
+        availability: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_supply_air_humidity') | is_number }}"
+
+      - name: "HAPSIC Zehnder Supply Flow"
+        unique_id: hapsic_zehnder_supply_flow
+        unit_of_measurement: "m³/h"
+        state_class: measurement
+        state: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow') }}"
+        availability: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow') | is_number }}"
+
+      - name: "HAPSIC Zehnder Extract Flow"
+        unique_id: hapsic_zehnder_extract_flow
+        unit_of_measurement: "m³/h"
+        state_class: measurement
+        state: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_exhaust_fan_flow') }}"
+        availability: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_exhaust_fan_flow') | is_number }}"
+
+      # --- Shelly Duct Sensors ---
+      - name: "HAPSIC Shelly Duct Temp"
+        unique_id: hapsic_shelly_duct_t
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ states('sensor.shelly0110dimg3_28372f3e866c_temperature_2') }}"
+        availability: "{{ states('sensor.shelly0110dimg3_28372f3e866c_temperature_2') | is_number }}"
+
+      - name: "HAPSIC Shelly Duct RH"
+        unique_id: hapsic_shelly_duct_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: "{{ states('sensor.shelly0110dimg3_28372f3e866c_input_100_analog') }}"
+        availability: "{{ states('sensor.shelly0110dimg3_28372f3e866c_input_100_analog') | is_number }}"
+
+      # --- Computed Averages ---
+      - name: "HAPSIC Room Average Temp"
+        unique_id: hapsic_room_average_temp
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: >
+          {% set sensors = [
+            states('sensor.round_room_awair_temperature'),
+            states('sensor.kitchen_awair_temperature'),
+            states('sensor.awair_element_7256_temperature')
+          ] | select('is_number') | map('float') | list %}
+          {% if sensors | count > 0 %}
+            {{ (sensors | sum / sensors | count) | round(1) }}
+          {% else %}
+            unavailable
+          {% endif %}
+        availability: >
+          {{ [states('sensor.round_room_awair_temperature'),
+              states('sensor.kitchen_awair_temperature'),
+              states('sensor.awair_element_7256_temperature')]
+             | select('is_number') | list | count > 0 }}
+
+      - name: "HAPSIC Room Average RH"
+        unique_id: hapsic_room_average_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: >
+          {% set sensors = [
+            states('sensor.round_room_awair_humidity'),
+            states('sensor.kitchen_awair_humidity'),
+            states('sensor.awair_element_7256_humidity')
+          ] | select('is_number') | map('float') | list %}
+          {% if sensors | count > 0 %}
+            {{ (sensors | sum / sensors | count) | round(1) }}
+          {% else %}
+            unavailable
+          {% endif %}
+        availability: >
+          {{ [states('sensor.round_room_awair_humidity'),
+              states('sensor.kitchen_awair_humidity'),
+              states('sensor.awair_element_7256_humidity')]
+             | select('is_number') | list | count > 0 }}
+
+      # --- House Averages (combines HAPSIC + ComfoAirQ) ---
+      - name: "House Average Temperature"
+        unique_id: house_average_temperature
+        unit_of_measurement: "°F"
+        device_class: temperature
+        state_class: measurement
+        state: >
+          {% set temps = [states('sensor.hapsic_room_average_temp'), states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_temperature')] | select('is_number') | map('float') | list %}
+          {{ (temps | sum / temps | count) | round(1) if temps | count > 0 else 'unavailable' }}
+        availability: >
+          {{ states('sensor.hapsic_room_average_temp') | is_number or states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_temperature') | is_number }}
+
+      - name: "House Average Humidity"
+        unique_id: house_average_humidity
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: >
+          {% set hums = [states('sensor.hapsic_room_average_rh'), states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity')] | select('is_number') | map('float') | list %}
+          {{ (hums | sum / hums | count) | round(1) if hums | count > 0 else 'unavailable' }}
+        availability: >
+          {{ states('sensor.hapsic_room_average_rh') | is_number or states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity') | is_number }}
+
+      # DELETED: Cleansed Inside Temp/RH proxies (v7.0)
+      # These were broken (referenced phantom comfoairq_inside_* entities).
+      # The authoritative versions live in humid.yaml Block A (triggered template).
+
+      # --- Zehnder Extract Humidity Proxy ---
+      - name: "HAPSIC Zehnder Extract RH"
+        unique_id: hapsic_zehnder_extract_rh
+        unit_of_measurement: "%"
+        device_class: humidity
+        state_class: measurement
+        state: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity') }}"
+        availability: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity') | is_number }}"
+
+# --- HAPSIC MQTT Sensors (not in humid.yaml) ---
+mqtt:
+  sensor:
+    - name: "HAPSIC Is Target Infeasible"
+      unique_id: hapsic_is_target_infeasible
+      state_topic: "hapsic/telemetry/state"
+      value_template: "{{ value_json.process.is_infeasible }}"
+      icon: mdi:alert-circle
+    - name: "HAPSIC Structure Velocity"
+      unique_id: hapsic_structure_velocity
+      state_topic: "hapsic/telemetry/state"
+      value_template: "{{ value_json.process.structure_velocity | round(2) }}"
+      unit_of_measurement: "°F/hr"
+      state_class: measurement
+      icon: mdi:chart-line
+    - name: "HAPSIC Health Measured Steam"
+      unique_id: hapsic_health_measured_steam
+      state_topic: "hapsic/telemetry/state"
+      value_template: "{{ value_json.health.measured_steam_lbs_hr | round(2) }}"
+      unit_of_measurement: "lbs/hr"
+      state_class: measurement
+      icon: mdi:gauge-full
+    - name: "HAPSIC Health Production Efficiency"
+      unique_id: hapsic_health_production_efficiency
+      state_topic: "hapsic/telemetry/state"
+      value_template: "{{ value_json.health.production_efficiency | round(1) }}"
+      unit_of_measurement: "%"
+      icon: mdi:percent-circle
+
+    - name: "HAPSIC Economy Advisory Reason"
+      unique_id: hapsic_economy_advisory_reason
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ adv.economy_reason | default('CLEAR') }}
+      icon: mdi:comment-alert-outline
+
+    - name: "HAPSIC Economy Negative Net Streak"
+      unique_id: hapsic_economy_negative_net_streak
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ adv.negative_net_minutes | default(0) | round(1) }}
+      unit_of_measurement: "min"
+      state_class: measurement
+      icon: mdi:timer-sand
+
+    - name: "HAPSIC Economy Severe Net Streak"
+      unique_id: hapsic_economy_severe_net_streak
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ adv.severe_negative_minutes | default(0) | round(1) }}
+      unit_of_measurement: "min"
+      state_class: measurement
+      icon: mdi:timer-alert-outline
+
+    - name: "HAPSIC Economy Suggested Target Delta"
+      unique_id: hapsic_economy_suggested_target_delta
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ adv.suggested_target_delta | default(0) | round(1) }}
+      unit_of_measurement: "°F"
+      device_class: temperature
+      state_class: measurement
+      icon: mdi:target-variant
+
+  binary_sensor:
+    - name: "HAPSIC Economy Advisory Active"
+      unique_id: hapsic_economy_advisory_active
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ 'ON' if adv.economy_active | default(false) else 'OFF' }}
+      icon: mdi:leaf-circle-outline
+
+    - name: "HAPSIC Economy Advisory Severe"
+      unique_id: hapsic_economy_advisory_severe
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ 'ON' if adv.economy_severe | default(false) else 'OFF' }}
+      icon: mdi:alert-decagram-outline
+
+    - name: "HAPSIC Economy Steaming Active"
+      unique_id: hapsic_economy_steaming_active
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ 'ON' if adv.steaming_active | default(false) else 'OFF' }}
+      icon: mdi:kettle-steam-outline
+
+sensor:
+  - platform: history_stats
+    name: "HAPSIC Economy Advisory Time 7d"
+    unique_id: hapsic_economy_advisory_time_7d
+    entity_id: binary_sensor.hapsic_economy_advisory_active
+    state: "on"
+    type: time
+    start: "{{ now() - timedelta(days=7) }}"
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: "HAPSIC Economy Advisory Count 7d"
+    unique_id: hapsic_economy_advisory_count_7d
+    entity_id: binary_sensor.hapsic_economy_advisory_active
+    state: "on"
+    type: count
+    start: "{{ now() - timedelta(days=7) }}"
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: "HAPSIC Economy Severe Time 7d"
+    unique_id: hapsic_economy_severe_time_7d
+    entity_id: binary_sensor.hapsic_economy_advisory_severe
+    state: "on"
+    type: time
+    start: "{{ now() - timedelta(days=7) }}"
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: "HAPSIC Economy Steaming Time 7d"
+    unique_id: hapsic_economy_steaming_time_7d
+    entity_id: binary_sensor.hapsic_economy_steaming_active
+    state: "on"
+    type: time
+    start: "{{ now() - timedelta(days=7) }}"
+    end: "{{ now() }}"

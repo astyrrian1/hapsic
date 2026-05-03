@@ -27,6 +27,8 @@ HAPSIC solves this with math.
 
 HAPSIC ships with a generic **Mission Control** dashboard for monitoring the physics engine, duct safety, and moisture balance in real time. It uses only HAPSIC contract entities and intentionally excludes site-specific sensors, locations, rooms, vendors, and personal Home Assistant helpers.
 
+The companion Home Assistant MQTT/package definitions live in [`packages/hapsic_sensors.yaml`](packages/hapsic_sensors.yaml). Copy that file into your Home Assistant `packages/` directory when manually installing or updating the dashboard sensors.
+
 **Prerequisites** (install via HACS → Frontend):
 - [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom)
 - [ApexCharts Card](https://github.com/RomRider/apexcharts-card)
@@ -34,10 +36,11 @@ HAPSIC ships with a generic **Mission Control** dashboard for monitoring the phy
 - [card-mod](https://github.com/thomasloven/lovelace-card-mod)
 
 **To install:**
-1. In Home Assistant, go to **Settings → Dashboards → Add Dashboard**
-2. Open the new dashboard, click **⋮** → **Edit Dashboard** → **⋮** → **Raw configuration editor**
-3. Paste the contents of [`dashboards/mission-control.yaml`](dashboards/mission-control.yaml)
-4. Save
+1. Copy [`packages/hapsic_sensors.yaml`](packages/hapsic_sensors.yaml) into your Home Assistant `packages/` directory and restart Home Assistant Core
+2. In Home Assistant, go to **Settings → Dashboards → Add Dashboard**
+3. Open the new dashboard, click **⋮** → **Edit Dashboard** → **⋮** → **Raw configuration editor**
+4. Paste the contents of [`dashboards/mission-control.yaml`](dashboards/mission-control.yaml)
+5. Save
 
 Personal production dashboards should live in your own Home Assistant config repository. Keep local-only entities, room names, vendor hardware, and location-specific context out of this open-source dashboard.
 
@@ -47,6 +50,7 @@ Personal production dashboards should live in your own Home Assistant config rep
 - Physics and control: `sensor.hapsic_steam_voltage`, `sensor.hapsic_steam_mass`, `sensor.hapsic_ventilation_loss`, `sensor.hapsic_net_flux`, `sensor.hapsic_structure_velocity`, `sensor.hapsic_room_deficit`, `sensor.hapsic_target_duct_dp`, `sensor.hapsic_max_achievable_dp`, `sensor.hapsic_is_target_infeasible`
 - Psychrometrics and duct safety: `sensor.hapsic_room_dew_point`, `sensor.hapsic_room_average_temp`, `sensor.hapsic_room_average_rh`, `sensor.hapsic_pre_steam_dp`, `sensor.hapsic_duct_dp`, `sensor.hapsic_cleansed_supply_temp`, `sensor.hapsic_cleansed_supply_rh`, `sensor.hapsic_cleansed_post_steam_temp`, `sensor.hapsic_cleansed_post_steam_rh`, `sensor.hapsic_supply_flow`, `sensor.hapsic_cleansed_airflow`
 - Health: `sensor.hapsic_chi_instant`, `sensor.hapsic_health_measured_steam`, `sensor.hapsic_health_production_efficiency`
+- Economy advisory: `binary_sensor.hapsic_economy_advisory_active`, `binary_sensor.hapsic_economy_advisory_severe`, `binary_sensor.hapsic_economy_steaming_active`, `sensor.hapsic_economy_advisory_reason`, `sensor.hapsic_economy_negative_net_streak`, `sensor.hapsic_economy_severe_net_streak`, `sensor.hapsic_economy_suggested_target_delta`, `sensor.hapsic_economy_advisory_time_7d`, `sensor.hapsic_economy_advisory_count_7d`, `sensor.hapsic_economy_severe_time_7d`, `sensor.hapsic_economy_steaming_time_7d`
 
 ## Notification Blueprints
 

@@ -10,7 +10,7 @@ class HapsicController(hass.Hass):
 
     def initialize(self):
         """
-        HAPSIC 2.6.1
+        HAPSIC 2.7.0
         Includes:
         1. Absolute Dew Point Setpoint Paradigm.
         2. Real-time Building Physics Mass Balance (1380 CFM50 / 17.0 N-Factor).
@@ -104,6 +104,17 @@ class HapsicController(hass.Hass):
         self.max_achievable_dp = 0.0
         self.is_target_infeasible = False
         self.chi_instant = 0.0
+
+        # --- Economy Advisory (observe-only; never changes target) ---
+        self.economy_negative_streak_sec = 0.0
+        self.economy_severe_streak_sec = 0.0
+        self.economy_recovery_streak_sec = 0.0
+        self.economy_advisory_active = False
+        self.economy_advisory_severe = False
+        self.economy_steaming_active = False
+        self.economy_useful_demand = False
+        self.economy_advisory_reason = "CLEAR"
+        self.economy_advisory_target_delta = 0.0
 
         # Restore CHI EMA from persistent storage
         try:
@@ -539,6 +550,7 @@ class HapsicController(hass.Hass):
 
         self.write_output()
         self.run_diagnostics()
+        self.update_economy_advisory()
         self.publish_telemetry()
 
         # --- HEARTBEAT ---
@@ -550,7 +562,11 @@ class HapsicController(hass.Hass):
                 f"Duct DP: {self.duct_dp:.1f}F | "
                 f"d(DuctDP)/dt: {self.duct_derivative:.2f}F/m | "
                 f"Duct RH: {self.duct_rh:.1f}% | "
-                f"Out: {self.steam_voltage:.1f}V",
+                f"Out: {self.steam_voltage:.1f}V | "
+                f"EcoAdv: {self.economy_advisory_reason} "
+                f"neg={self.economy_negative_streak_sec / 60.0:.0f}m "
+                f"severe={self.economy_severe_streak_sec / 60.0:.0f}m "
+                f"delta={self.economy_advisory_target_delta:.1f}F",
                 level="INFO"
             )
 
@@ -987,6 +1003,60 @@ class HapsicController(hass.Hass):
             else:
                 self.chi_instant = 0.0
 
+    def update_economy_advisory(self):
+        """Observe periods where active steaming is not producing useful net flux.
+
+        This is intentionally advisory only. It publishes enough state for HA
+        history to answer, after a week, whether target reduction should be
+        promoted into the control loop.
+        """
+        active_steam = (
+            self.fsm_state in ["ACTIVE_CRUISE", "ACTIVE_TURBO", "TURBO_PENDING"]
+            or self.steam_voltage > 0.1
+            or self.calc_steam_mass > 0.05
+        )
+        room_deficit = self.target_room_dp - self.room_dp
+        useful_demand = room_deficit > 0.2
+        self.economy_steaming_active = active_steam
+        self.economy_useful_demand = useful_demand
+        negative_net = self.calc_flux <= 0.0
+        severe_negative_net = self.calc_flux <= -0.5
+        recovering = self.calc_flux > 0.25
+
+        if active_steam and useful_demand and negative_net:
+            self.economy_negative_streak_sec += self.dt
+        else:
+            self.economy_negative_streak_sec = 0.0
+
+        if active_steam and useful_demand and severe_negative_net:
+            self.economy_severe_streak_sec += self.dt
+        else:
+            self.economy_severe_streak_sec = 0.0
+
+        if active_steam and recovering:
+            self.economy_recovery_streak_sec += self.dt
+        else:
+            self.economy_recovery_streak_sec = 0.0
+
+        self.economy_advisory_active = self.economy_negative_streak_sec >= 900.0
+        self.economy_advisory_severe = self.economy_severe_streak_sec >= 900.0
+
+        if self.economy_advisory_severe:
+            self.economy_advisory_reason = "SEVERE_NEGATIVE_NET_FLUX"
+            self.economy_advisory_target_delta = -1.0
+        elif self.economy_advisory_active:
+            self.economy_advisory_reason = "NEGATIVE_NET_FLUX"
+            self.economy_advisory_target_delta = -0.5
+        elif self.economy_negative_streak_sec > 0.0:
+            self.economy_advisory_reason = "EVALUATING_NEGATIVE_NET_FLUX"
+            self.economy_advisory_target_delta = 0.0
+        elif self.economy_recovery_streak_sec >= 900.0:
+            self.economy_advisory_reason = "RECOVERED"
+            self.economy_advisory_target_delta = 0.0
+        else:
+            self.economy_advisory_reason = "CLEAR"
+            self.economy_advisory_target_delta = 0.0
+
     def publish_telemetry(self):
         struct_vel = 0.0
         if len(self.room_dp_buffer) > 0:
@@ -1028,6 +1098,17 @@ class HapsicController(hass.Hass):
             "physics": {
                 "flux_net": round(self.calc_flux, 2) if hasattr(self, 'calc_flux') else 0.0,
                 "loss_vent": round(self.calc_loss_vent, 2) if hasattr(self, 'calc_loss_vent') else 0.0
+            },
+            "advisory": {
+                "economy_active": self.economy_advisory_active,
+                "economy_severe": self.economy_advisory_severe,
+                "steaming_active": self.economy_steaming_active,
+                "useful_demand": self.economy_useful_demand,
+                "economy_reason": self.economy_advisory_reason,
+                "negative_net_minutes": round(self.economy_negative_streak_sec / 60.0, 1),
+                "severe_negative_minutes": round(self.economy_severe_streak_sec / 60.0, 1),
+                "recovery_minutes": round(self.economy_recovery_streak_sec / 60.0, 1),
+                "suggested_target_delta": round(self.economy_advisory_target_delta, 1),
             },
             "health": {
                 "boil_status": getattr(self, 'boil_status', "COLD"),

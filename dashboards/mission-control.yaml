@@ -409,6 +409,76 @@ views:
               | **NET FLUX** | **{{ states('sensor.hapsic_net_flux') }} lbs/hr** |
               **{{ 'CHARGING' if states('sensor.hapsic_net_flux')|float(0) > 0 else
               'DRAINING' }}** |
+          - type: grid
+            columns: 4
+            square: false
+            cards:
+              - type: tile
+                entity: binary_sensor.hapsic_economy_advisory_active
+                name: Economy Advisory
+                icon: mdi:leaf-circle-outline
+                color: amber
+                state_content: state
+              - type: tile
+                entity: sensor.hapsic_economy_advisory_reason
+                name: Reason
+                icon: mdi:comment-alert-outline
+                state_content: state
+              - type: tile
+                entity: sensor.hapsic_economy_negative_net_streak
+                name: Negative Streak
+                icon: mdi:timer-sand
+                state_content: state
+              - type: tile
+                entity: sensor.hapsic_economy_suggested_target_delta
+                name: Suggested Delta
+                icon: mdi:target-variant
+                state_content: state
+          - type: markdown
+            title: Economy Promotion Readout
+            content: >
+              {% set advisory_h = states('sensor.hapsic_economy_advisory_time_7d')|float(0) %}
+              {% set severe_h = states('sensor.hapsic_economy_severe_time_7d')|float(0) %}
+              {% set steaming_h = states('sensor.hapsic_economy_steaming_time_7d')|float(0) %}
+              {% set events = states('sensor.hapsic_economy_advisory_count_7d')|float(0) %}
+              {% set ratio = (advisory_h / steaming_h * 100) if steaming_h > 0 else 0 %}
+              {% set candidate = steaming_h >= 24 and (ratio >= 25 or severe_h >= 4) %}
+
+              | 7-day metric | Value |
+
+              | :--- | :---: |
+
+              | Advisory while steaming | `{{ advisory_h|round(1) }} h` |
+
+              | Severe advisory | `{{ severe_h|round(1) }} h` |
+
+              | Total steaming | `{{ steaming_h|round(1) }} h` |
+
+              | Advisory share | `{{ ratio|round(0) }}%` |
+
+              | Events | `{{ events|round(0) }}` |
+
+              | **Promotion gate** | **{{ 'CANDIDATE' if candidate else 'KEEP OBSERVING' }}** |
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: 7-Day Economy Advisory
+              show_states: true
+              colorize_states: true
+            graph_span: 7d
+            series:
+              - entity: sensor.hapsic_economy_negative_net_streak
+                name: Negative Streak
+                color: "#ff9800"
+                stroke_width: 2
+              - entity: sensor.hapsic_economy_severe_net_streak
+                name: Severe Streak
+                color: "#f44336"
+                stroke_width: 2
+              - entity: sensor.hapsic_economy_suggested_target_delta
+                name: Suggested Delta
+                color: "#607d8b"
+                stroke_width: 2
           - type: custom:power-flow-card-plus
             title: HAPSIC Physics Engine
             entities:
