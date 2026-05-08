@@ -5,6 +5,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Passive moisture import telemetry**: Added observe-only advisory fields for outdoor-air moisture import/export (`passive_import_lbs_hr`, `passive_export_lbs_hr`) and a `passive_import_candidate` flag. This lets Home Assistant evaluate whether Zehnder ventilation could import useful humidity before any control-loop promotion.
+
 ## [v2.7.0] — 2026-05-03
 
 ### Added

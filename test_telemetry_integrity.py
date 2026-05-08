@@ -188,6 +188,9 @@ def test_telemetry_schema_integrity():
         "economy_severe": False,
         "steaming_active": False,
         "useful_demand": False,
+        "passive_import_candidate": False,
+        "passive_import_lbs_hr": 0.0,
+        "passive_export_lbs_hr": 0.0,
         "economy_reason": "CLEAR",
         "suggested_target_delta": 0.0,
     }
@@ -203,6 +206,32 @@ def test_telemetry_schema_integrity():
 
     print("✅ ALL TELEMETRY MAPPINGS VERIFIED. NO SILENT FALLBACKS DETECTED.")
     return True
+
+
+def test_passive_import_advisory_math():
+    """Validates observe-only outdoor moisture import telemetry."""
+    module = load_controller()
+    controller = module.HapsicController()
+
+    controller.supply_flow = 150.0
+    controller.RHO = 0.065
+    controller.outdoor_w = 45.0
+    controller.room_w = 35.0
+    controller.target_room_dp = 48.0
+    controller.room_dp = 47.0
+    controller.outdoor_dp = 48.2
+    controller.fsm_state = "STANDBY"
+    controller.steam_voltage = 0.0
+    controller.calc_steam_mass = 0.0
+    controller.calc_flux = 0.0
+    controller.dt = 5.0
+
+    controller.update_economy_advisory()
+
+    expected = (150.0 * 0.5886) * 60.0 * 0.065 * 10.0 / 7000.0
+    assert round(controller.economy_passive_import_lbs_hr, 3) == round(expected, 3)
+    assert controller.economy_passive_export_lbs_hr == 0.0
+    assert controller.economy_passive_import_candidate is True
 
 
 if __name__ == "__main__":

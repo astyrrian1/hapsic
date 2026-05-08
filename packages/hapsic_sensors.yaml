@@ -250,6 +250,26 @@ mqtt:
       state_class: measurement
       icon: mdi:target-variant
 
+    - name: "HAPSIC Passive Import"
+      unique_id: hapsic_passive_import_lbs_hr
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ adv.passive_import_lbs_hr | default(0) | round(3) }}
+      unit_of_measurement: "lbs/hr"
+      state_class: measurement
+      icon: mdi:weather-windy
+
+    - name: "HAPSIC Passive Export"
+      unique_id: hapsic_passive_export_lbs_hr
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ adv.passive_export_lbs_hr | default(0) | round(3) }}
+      unit_of_measurement: "lbs/hr"
+      state_class: measurement
+      icon: mdi:weather-windy
+
   binary_sensor:
     - name: "HAPSIC Economy Advisory Active"
       unique_id: hapsic_economy_advisory_active
@@ -274,6 +294,14 @@ mqtt:
         {% set adv = value_json.advisory | default({}) %}
         {{ 'ON' if adv.steaming_active | default(false) else 'OFF' }}
       icon: mdi:kettle-steam-outline
+
+    - name: "HAPSIC Passive Import Candidate"
+      unique_id: hapsic_passive_import_candidate
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set adv = value_json.advisory | default({}) %}
+        {{ 'ON' if adv.passive_import_candidate | default(false) else 'OFF' }}
+      icon: mdi:leaf-arrow-up
 
 sensor:
   - platform: history_stats

@@ -113,6 +113,9 @@ class HapsicController(hass.Hass):
         self.economy_advisory_severe = False
         self.economy_steaming_active = False
         self.economy_useful_demand = False
+        self.economy_passive_import_lbs_hr = 0.0
+        self.economy_passive_export_lbs_hr = 0.0
+        self.economy_passive_import_candidate = False
         self.economy_advisory_reason = "CLEAR"
         self.economy_advisory_target_delta = 0.0
 
@@ -1010,6 +1013,16 @@ class HapsicController(hass.Hass):
         history to answer, after a week, whether target reduction should be
         promoted into the control loop.
         """
+        cfm = max(0.0, self.supply_flow * 0.5886)
+        dry_air_lbs_hr = cfm * 60.0 * self.RHO
+        outdoor_delta_grains = self.outdoor_w - self.room_w
+        self.economy_passive_import_lbs_hr = (
+            dry_air_lbs_hr * max(0.0, outdoor_delta_grains) / 7000.0
+        )
+        self.economy_passive_export_lbs_hr = (
+            dry_air_lbs_hr * max(0.0, -outdoor_delta_grains) / 7000.0
+        )
+
         active_steam = (
             self.fsm_state in ["ACTIVE_CRUISE", "ACTIVE_TURBO", "TURBO_PENDING"]
             or self.steam_voltage > 0.1
@@ -1019,6 +1032,11 @@ class HapsicController(hass.Hass):
         useful_demand = room_deficit > 0.2
         self.economy_steaming_active = active_steam
         self.economy_useful_demand = useful_demand
+        self.economy_passive_import_candidate = (
+            useful_demand
+            and self.economy_passive_import_lbs_hr >= 0.05
+            and self.outdoor_dp <= (self.target_room_dp + 0.5)
+        )
         negative_net = self.calc_flux <= 0.0
         severe_negative_net = self.calc_flux <= -0.5
         recovering = self.calc_flux > 0.25
@@ -1104,6 +1122,9 @@ class HapsicController(hass.Hass):
                 "economy_severe": self.economy_advisory_severe,
                 "steaming_active": self.economy_steaming_active,
                 "useful_demand": self.economy_useful_demand,
+                "passive_import_candidate": self.economy_passive_import_candidate,
+                "passive_import_lbs_hr": round(self.economy_passive_import_lbs_hr, 3),
+                "passive_export_lbs_hr": round(self.economy_passive_export_lbs_hr, 3),
                 "economy_reason": self.economy_advisory_reason,
                 "negative_net_minutes": round(self.economy_negative_streak_sec / 60.0, 1),
                 "severe_negative_minutes": round(self.economy_severe_streak_sec / 60.0, 1),
