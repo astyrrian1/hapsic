@@ -388,6 +388,9 @@ class HapsicController : public PollingComponent {
   bool economy_advisory_severe_ = false;
   bool economy_steaming_active_ = false;
   bool economy_useful_demand_ = false;
+  bool economy_passive_import_candidate_ = false;
+  float economy_passive_import_lbs_hr_ = 0.0f;
+  float economy_passive_export_lbs_hr_ = 0.0f;
   float economy_advisory_target_delta_ = 0.0f;
   std::string economy_advisory_reason_ = "CLEAR";
 

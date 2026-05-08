@@ -1032,12 +1032,21 @@ void HapsicController::run_diagnostics() {
 }
 
 void HapsicController::update_economy_advisory() {
+  float dry_air_kg_hr = std::max(0.0f, supply_flow_) * RHO;
+  float outdoor_delta_g_kg = outdoor_w_ - room_w_;
+  float passive_import_kg_hr = dry_air_kg_hr * std::max(0.0f, outdoor_delta_g_kg) / 1000.0f;
+  float passive_export_kg_hr = dry_air_kg_hr * std::max(0.0f, -outdoor_delta_g_kg) / 1000.0f;
+  economy_passive_import_lbs_hr_ = passive_import_kg_hr * 2.20462f;
+  economy_passive_export_lbs_hr_ = passive_export_kg_hr * 2.20462f;
+
   bool active_steam = fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO || fsm_state_ == TURBO_PENDING ||
                       steam_voltage_ > 0.1f || steam_mass_kg_hr_ > 0.05f;
   float room_deficit = target_room_dp_ - room_dp_;
   bool useful_demand = room_deficit > 0.2f;
   economy_steaming_active_ = active_steam;
   economy_useful_demand_ = useful_demand;
+  economy_passive_import_candidate_ =
+      useful_demand && economy_passive_import_lbs_hr_ >= 0.05f && outdoor_dp_ <= (target_room_dp_ + 0.28f);
   bool negative_net = net_flux_ <= 0.0f;
   bool severe_negative_net = net_flux_ <= -0.5f;
   bool recovering = net_flux_ > 0.25f;
@@ -1278,6 +1287,8 @@ void HapsicController::publish_telemetry() {
            "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
            "\"advisory\":{\"economy_active\":%s,\"economy_severe\":%s,"
            "\"steaming_active\":%s,\"useful_demand\":%s,"
+           "\"passive_import_candidate\":%s,\"passive_import_lbs_hr\":%.3f,"
+           "\"passive_export_lbs_hr\":%.3f,"
            "\"economy_reason\":\"%s\",\"negative_net_minutes\":%.1f,"
            "\"severe_negative_minutes\":%.1f,\"recovery_minutes\":%.1f,"
            "\"suggested_target_delta\":%.1f},"
@@ -1295,11 +1306,12 @@ void HapsicController::publish_telemetry() {
            structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_,
            economy_advisory_active_ ? "true" : "false", economy_advisory_severe_ ? "true" : "false",
            economy_steaming_active_ ? "true" : "false", economy_useful_demand_ ? "true" : "false",
-           economy_advisory_reason_.c_str(), economy_negative_streak_sec_ / 60.0f, economy_severe_streak_sec_ / 60.0f,
-           economy_recovery_streak_sec_ / 60.0f, economy_advisory_target_delta_, 1.0f, chi_ema_, boil_status_.c_str(),
-           get_effective_max_capacity(), last_measured_steam_, prod_eff, boiler_curve_[0], boiler_curve_[1],
-           boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
-           boiler_curve_counts_[2], boiler_curve_counts_[3]);
+           economy_passive_import_candidate_ ? "true" : "false", economy_passive_import_lbs_hr_,
+           economy_passive_export_lbs_hr_, economy_advisory_reason_.c_str(), economy_negative_streak_sec_ / 60.0f,
+           economy_severe_streak_sec_ / 60.0f, economy_recovery_streak_sec_ / 60.0f, economy_advisory_target_delta_,
+           1.0f, chi_ema_, boil_status_.c_str(), get_effective_max_capacity(), last_measured_steam_, prod_eff,
+           boiler_curve_[0], boiler_curve_[1], boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0],
+           boiler_curve_counts_[1], boiler_curve_counts_[2], boiler_curve_counts_[3]);
 
 #ifdef USE_MQTT
   if (mqtt::global_mqtt_client != nullptr) {
