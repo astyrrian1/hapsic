@@ -7,6 +7,12 @@ import appdaemon.plugins.hass.hassapi as hass
 
 
 class HapsicController(hass.Hass):
+    SHELLY_LIGHT_ENTITY = "light.shelly0110dimg3_28372f3e866c"
+    SHELLY_DUCT_TEMP_ENTITY = "sensor.shelly0110dimg3_28372f3e866c_temperature_2"
+    SHELLY_DUCT_RH_ENTITY = "sensor.shelly0110dimg3_28372f3e866c_input_100_analog"
+    HAPSIC_DUCT_TEMP_ENTITY = "sensor.hapsic_cleansed_post_steam_temp"
+    HAPSIC_DUCT_RH_ENTITY = "sensor.hapsic_cleansed_post_steam_rh"
+    SHELLY_OFFLINE_FAULT_SECONDS = 60.0
 
     def initialize(self):
         """
@@ -77,6 +83,8 @@ class HapsicController(hass.Hass):
         self.last_valid_outdoor_time = 0
         self.last_valid_duct_time = 0
         self.last_valid_flow_time = 0
+        self.shelly_offline_since = 0
+        self.pending_fault_reason = None
 
         self.purge_ticks = 0
         self.turbo_wait_ticks = 0
@@ -157,7 +165,7 @@ class HapsicController(hass.Hass):
         self.log("SYSTEM RESTART DETECTED: Executing Safety Park Protocol...", level="WARNING")
         self.call_service("button/press", entity_id="button.zehnder_comfoair_q_a4cb9c_boost_off")
         self.call_service("switch/turn_on", entity_id="switch.zehnder_comfoair_q_a4cb9c_auto_ventilation")
-        self.turn_off("light.shelly0110dimg3_28372f3e866c")
+        self.turn_off(self.SHELLY_LIGHT_ENTITY)
         self.log("SAFETY PARK COMPLETE: Fan -> Auto, Valve -> 0V. Entering STANDBY.")
 
         self.run_every(self.master_tick, "now", 5)
@@ -217,6 +225,54 @@ class HapsicController(hass.Hass):
             current["t"] = (self.ema_alpha * val_t) + ((1 - self.ema_alpha) * current["t"])
             current["rh"] = (self.ema_alpha * val_rh) + ((1 - self.ema_alpha) * current["rh"])
         return current["t"], current["rh"]
+
+    @staticmethod
+    def is_invalid_state(value):
+        if value is None:
+            return True
+        return str(value).strip().lower() in {"unavailable", "unknown", "none", ""}
+
+    def check_shelly_availability(self, now_time):
+        monitored = {
+            self.SHELLY_LIGHT_ENTITY: self.get_state(self.SHELLY_LIGHT_ENTITY),
+            self.SHELLY_DUCT_TEMP_ENTITY: self.get_state(self.SHELLY_DUCT_TEMP_ENTITY),
+            self.SHELLY_DUCT_RH_ENTITY: self.get_state(self.SHELLY_DUCT_RH_ENTITY),
+            self.HAPSIC_DUCT_TEMP_ENTITY: self.get_state(self.HAPSIC_DUCT_TEMP_ENTITY),
+            self.HAPSIC_DUCT_RH_ENTITY: self.get_state(self.HAPSIC_DUCT_RH_ENTITY),
+        }
+        offline = {
+            entity_id: state
+            for entity_id, state in monitored.items()
+            if self.is_invalid_state(state)
+        }
+
+        if not offline:
+            self.shelly_offline_since = 0
+            self.pending_fault_reason = None
+            return True
+
+        if self.shelly_offline_since == 0:
+            self.shelly_offline_since = now_time
+
+        offline_age = now_time - self.shelly_offline_since
+        offline_detail = ", ".join(
+            f"{entity_id}={state!r}" for entity_id, state in offline.items()
+        )
+        if offline_age < self.SHELLY_OFFLINE_FAULT_SECONDS:
+            self.log(
+                f"HAL ALERT: Shelly dependency offline for {offline_age:.0f}s "
+                f"({offline_detail}). Waiting for recovery.",
+                level="WARNING",
+            )
+            return True
+
+        self.pending_fault_reason = "Shelly Offline"
+        self.log(
+            f"HAL CRITICAL: Shelly dependency offline for {offline_age:.0f}s "
+            f"({offline_detail}).",
+            level="ERROR",
+        )
+        return False
 
     def read_and_validate_sensors(self):
         try:
@@ -342,8 +398,8 @@ class HapsicController(hass.Hass):
                     return False
 
             # --- Post-Steam (Duct) with EMA Filter (with safe fallback + 30m cache) ---
-            raw_duct_t_str = self.get_state("sensor.hapsic_cleansed_post_steam_temp")
-            raw_duct_rh_str = self.get_state("sensor.hapsic_cleansed_post_steam_rh")
+            raw_duct_t_str = self.get_state(self.HAPSIC_DUCT_TEMP_ENTITY)
+            raw_duct_rh_str = self.get_state(self.HAPSIC_DUCT_RH_ENTITY)
             effective_duct_t, effective_duct_rh = safe_parse(raw_duct_t_str, raw_duct_rh_str)
 
             if effective_duct_t is not None and not math.isnan(effective_duct_t):
@@ -463,6 +519,11 @@ class HapsicController(hass.Hass):
         self.tick_counter += 1
         if self.turbo_lockout_ticks > 0: self.turbo_lockout_ticks -= 1
 
+        if not self.check_shelly_availability(now):
+            self.trigger_fault(self.pending_fault_reason or "Shelly Offline")
+            self.publish_telemetry()
+            return
+
         valid_sensors = self.read_and_validate_sensors()
         if not valid_sensors:
             startup_age = now - self.startup_ts
@@ -474,7 +535,7 @@ class HapsicController(hass.Hass):
                 )
                 self.publish_telemetry()
                 return
-            self.trigger_fault("Sensor Failure")
+            self.trigger_fault(self.pending_fault_reason or "Sensor Failure")
             self.publish_telemetry()
             return
 
@@ -868,16 +929,16 @@ class HapsicController(hass.Hass):
         brightness = max(0, min(255, brightness))
 
         # Closed-loop override logic
-        ha_state = self.get_state("light.shelly0110dimg3_28372f3e866c")
+        ha_state = self.get_state(self.SHELLY_LIGHT_ENTITY)
 
         if brightness == 0:
             if ha_state != "off":
                 self.log(f"SAFETY: Shelly is {ha_state} but requested 0%. Forcing OFF.", level="WARNING")
-                self.turn_off("light.shelly0110dimg3_28372f3e866c")
+                self.turn_off(self.SHELLY_LIGHT_ENTITY)
                 self.last_brightness = 0
         else:
             if brightness != self.last_brightness or ha_state == "off":
-                self.turn_on("light.shelly0110dimg3_28372f3e866c", brightness=brightness)
+                self.turn_on(self.SHELLY_LIGHT_ENTITY, brightness=brightness)
                 self.last_brightness = brightness
 
     # =========================================================================
