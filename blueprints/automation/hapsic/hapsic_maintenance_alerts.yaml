@@ -100,7 +100,7 @@ triggers:
 
   # Trigger 2: Fault cleared (FSM leaves FAULT)
   - trigger: state
-    entity_id: text_sensor.hapsic_fsm_state
+    entity_id: sensor.hapsic_fsm_state
     from: "FAULT"
     id: "fault_cleared"
 
@@ -153,11 +153,11 @@ actions:
           - condition: not
             conditions:
               - condition: state
-                entity_id: text_sensor.hapsic_fsm_state
+                entity_id: sensor.hapsic_fsm_state
                 state: "FAULT"
         sequence:
           - variables:
-              new_state: "{{ states('text_sensor.hapsic_fsm_state') }}"
+              new_state: "{{ states('sensor.hapsic_fsm_state') }}"
               msg: >-
                 ✅ HAPSIC fault cleared. Controller now in {{ new_state }}.
                 Humidifier resuming normal operation.

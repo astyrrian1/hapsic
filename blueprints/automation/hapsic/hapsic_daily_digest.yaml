@@ -46,7 +46,7 @@ variables:
   notify_svc: !input notify_service
   weather_ent: !input weather_entity
   # --- House Conditions ---
-  fsm_state: "{{ states('text_sensor.hapsic_fsm_state') }}"
+  fsm_state: "{{ states('sensor.hapsic_fsm_state') }}"
   house_rh: "{{ states('sensor.hapsic_room_average_rh_broken') }}"
   house_temp: "{{ states('sensor.hapsic_room_average_temp_broken') }}"
   house_dp: "{{ states('sensor.hapsic_room_dew_point') }}"

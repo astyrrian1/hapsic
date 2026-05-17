@@ -258,7 +258,7 @@ text_sensor:
   - platform: homeassistant
     name: "Production FSM State"
     id: prod_fsm_state
-    entity_id: text_sensor.hapsic_fsm_state
+    entity_id: sensor.hapsic_fsm_state
 
   - platform: template
     name: "FSM State Match"

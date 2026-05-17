@@ -45,7 +45,7 @@ The companion Home Assistant MQTT/package definitions live in [`packages/hapsic_
 Personal production dashboards should live in your own Home Assistant config repository. Keep local-only entities, room names, vendor hardware, and location-specific context out of this open-source dashboard.
 
 **Dashboard entity contract:**
-- State and faults: `text_sensor.hapsic_fsm_state`, `text_sensor.hapsic_fault_reason`, `sensor.hapsic_boil_status`
+- State and faults: `sensor.hapsic_fsm_state`, `sensor.hapsic_fault_reason`, `sensor.hapsic_boil_status`
 - User inputs/storage: `input_number.target_dew_point`, `input_number.humidifier_max_capacity`, `input_number.hapsic_chi_ema`, `input_text.hapsic_boiler_curve`
 - Physics and control: `sensor.hapsic_steam_voltage`, `sensor.hapsic_steam_mass`, `sensor.hapsic_ventilation_loss`, `sensor.hapsic_net_flux`, `sensor.hapsic_structure_velocity`, `sensor.hapsic_room_deficit`, `sensor.hapsic_target_duct_dp`, `sensor.hapsic_max_achievable_dp`, `sensor.hapsic_is_target_infeasible`
 - Psychrometrics and duct safety: `sensor.hapsic_room_dew_point`, `sensor.hapsic_room_average_temp`, `sensor.hapsic_room_average_rh`, `sensor.hapsic_pre_steam_dp`, `sensor.hapsic_duct_dp`, `sensor.hapsic_cleansed_supply_temp`, `sensor.hapsic_cleansed_supply_rh`, `sensor.hapsic_cleansed_post_steam_temp`, `sensor.hapsic_cleansed_post_steam_rh`, `sensor.hapsic_supply_flow`, `sensor.hapsic_cleansed_airflow`, `binary_sensor.hapsic_shelly_offline`

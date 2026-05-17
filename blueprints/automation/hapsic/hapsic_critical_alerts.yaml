@@ -49,7 +49,7 @@ variables:
     "Defrost Active": "❄️ ERV defrost cycle. Humidifier temporarily parked. Will auto-resume."
     "Economizer Bypass": "🌀 ERV bypass open. Humidifier parked to prevent waste."
     "Deadman Watchdog": "💀 Telemetry stale >120s. Controller may have crashed. Check system logs."
-  fault_reason: "{{ states('text_sensor.hapsic_fault_reason') }}"
+  fault_reason: "{{ states('sensor.hapsic_fault_reason') }}"
   fault_msg: >-
     {{ fault_messages.get(fault_reason,
        '🔧 Unknown fault: ' ~ fault_reason ~ '. Check HAPSIC logs.') }}
@@ -60,7 +60,7 @@ max_exceeded: silent
 
 triggers:
   - trigger: state
-    entity_id: text_sensor.hapsic_fsm_state
+    entity_id: sensor.hapsic_fsm_state
     to: "FAULT"
     id: "fsm_fault"
 

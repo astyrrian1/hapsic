@@ -5,6 +5,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.7.2] — 2026-05-17
+
+### Added
+- **Python Shelly outage watchdog**: The AppDaemon controller now monitors the Shelly actuator, raw Shelly duct temperature/RH entities, and HAPSIC duct proxy entities before normal sensor-cache handling. Sustained outage for 60 seconds raises a `Shelly Offline` fault instead of allowing stale duct cache values to hide the integration failure.
+- **Shelly offline HA package sensor**: Added `binary_sensor.hapsic_shelly_offline` to the companion Home Assistant package so HA automations can detect Shelly dependency loss directly.
+- **Shelly critical alert path**: The critical alert blueprint now sends a dedicated Shelly offline notification when `binary_sensor.hapsic_shelly_offline` remains active for 2 minutes.
+
+### Fixed
+- **Silent Shelly failures in Python mode**: Raw Shelly entities can no longer become unavailable while Python continues operating on stale cleansed duct proxy values without a named fault.
+
+### Changed
+- **Sensor fallback coverage**: Added regression tests for sustained Shelly light outage, raw Shelly sensor outage with still-numeric proxy values, and transient Shelly hiccups inside the grace window.
+
+### Deployment Notes
+After installing this release via HACS:
+1. Restart AppDaemon to load the updated Python controller.
+2. Copy or update `packages/hapsic_sensors.yaml` in Home Assistant and restart Home Assistant Core so `binary_sensor.hapsic_shelly_offline` is created.
+3. Re-import or update the HAPSIC Critical Fault Alerts blueprint if you use it.
+
+## [v2.7.1] — 2026-05-08
+
 ### Added
 - **Passive moisture import telemetry**: Added observe-only advisory fields for outdoor-air moisture import/export (`passive_import_lbs_hr`, `passive_export_lbs_hr`) and a `passive_import_candidate` flag. This lets Home Assistant evaluate whether Zehnder ventilation could import useful humidity before any control-loop promotion.
 

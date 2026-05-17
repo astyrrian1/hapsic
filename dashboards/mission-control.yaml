@@ -9,19 +9,19 @@ views:
           - type: custom:mushroom-title-card
             title: HAPSIC Mission Control
             subtitle: >-
-              {{ states('text_sensor.hapsic_fsm_state') | upper }} • Target {{
+              {{ states('sensor.hapsic_fsm_state') | upper }} • Target {{
               states('input_number.target_dew_point') }} °F DP • {{
-              states('text_sensor.hapsic_fault_reason') }}
+              states('sensor.hapsic_fault_reason') }}
           - type: conditional
             conditions:
               - condition: state
-                entity: text_sensor.hapsic_fsm_state
+                entity: sensor.hapsic_fsm_state
                 state: FAULT
             card:
               type: vertical-stack
               cards:
                 - type: tile
-                  entity: text_sensor.hapsic_fault_reason
+                  entity: sensor.hapsic_fault_reason
                   name: FAULT ACTIVE
                   icon: mdi:alert-octagon
                   color: red
@@ -29,14 +29,14 @@ views:
                   content: |
                     ### 🛑 Logic Lockout Active
                     The controller has entered safety shutdown.
-                    **Reason:** {{ states('text_sensor.hapsic_fault_reason') }}
+                    **Reason:** {{ states('sensor.hapsic_fault_reason') }}
           - type: conditional
             conditions:
               - condition: state
-                entity: text_sensor.hapsic_fsm_state
+                entity: sensor.hapsic_fsm_state
                 state: FAULT
               - condition: state
-                entity: text_sensor.hapsic_fault_reason
+                entity: sensor.hapsic_fault_reason
                 state: Economizer Bypass Active
             card:
               type: markdown
