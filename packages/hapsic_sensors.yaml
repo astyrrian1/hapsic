@@ -182,6 +182,24 @@ template:
         state: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity') }}"
         availability: "{{ states('sensor.zehnder_comfoair_q_a4cb9c_extract_air_humidity') | is_number }}"
 
+  - binary_sensor:
+      - name: "HAPSIC Shelly Offline"
+        unique_id: hapsic_shelly_offline
+        device_class: problem
+        icon: mdi:alert-octagon
+        state: >
+          {% set invalid = ['unavailable', 'unknown', 'none', ''] %}
+          {% set raw_temp = states('sensor.shelly0110dimg3_28372f3e866c_temperature_2') %}
+          {% set raw_rh = states('sensor.shelly0110dimg3_28372f3e866c_input_100_analog') %}
+          {% set proxy_temp = states('sensor.hapsic_shelly_duct_temp') %}
+          {% set proxy_rh = states('sensor.hapsic_shelly_duct_rh') %}
+          {% set actuator = states('light.shelly0110dimg3_28372f3e866c') %}
+          {{ raw_temp | lower in invalid
+             or raw_rh | lower in invalid
+             or proxy_temp | lower in invalid
+             or proxy_rh | lower in invalid
+             or actuator | lower in invalid }}
+
 # --- HAPSIC MQTT Sensors (not in humid.yaml) ---
 mqtt:
   sensor:

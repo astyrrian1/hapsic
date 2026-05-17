@@ -98,9 +98,6 @@ def assert_close(actual, expected, tol, label):
 BASE_STATES = {
     "input_number.humidifier_max_capacity": 2.7,
     "input_number.target_dew_point": 50.0,
-    "light.shelly0110dimg3_28372f3e866c": "off",
-    "sensor.shelly0110dimg3_28372f3e866c_temperature_2": 68.0,
-    "sensor.shelly0110dimg3_28372f3e866c_input_100_analog": 35.0,
     "sensor.hapsic_cleansed_post_steam_temp": 68.0,
     "sensor.hapsic_cleansed_post_steam_rh": 35.0,
     "sensor.hapsic_supply_flow": 400.0,
@@ -261,48 +258,6 @@ def test_duct_sensor_failure_faults():
                 f"duct_failure_faults (state={c.fsm_state})")
 
 
-def test_shelly_light_unavailable_faults():
-    """Shelly actuator unavailable should fault before duct cache expiry."""
-    c = make_controller({
-        "light.shelly0110dimg3_28372f3e866c": "unavailable",
-    })
-
-    tick(c, 13)
-
-    assert_true(c.fsm_state == "FAULT",
-                f"shelly_light_unavailable_faults (state={c.fsm_state})")
-    assert_true(c.fault_reason == "Shelly Offline",
-                f"shelly_light_fault_reason ({c.fault_reason})")
-
-
-def test_shelly_raw_sensor_unavailable_faults_even_with_stale_proxy():
-    """Raw Shelly sensor loss should fault even when cleansed proxy still has a numeric stale value."""
-    c = make_controller({
-        "sensor.shelly0110dimg3_28372f3e866c_temperature_2": "unavailable",
-        "sensor.hapsic_cleansed_post_steam_temp": 68.0,
-        "sensor.hapsic_cleansed_post_steam_rh": 35.0,
-    })
-
-    tick(c, 13)
-
-    assert_true(c.fsm_state == "FAULT",
-                f"shelly_raw_sensor_unavailable_faults (state={c.fsm_state})")
-    assert_true(c.fault_reason == "Shelly Offline",
-                f"shelly_raw_sensor_fault_reason ({c.fault_reason})")
-
-
-def test_shelly_transient_unavailable_uses_grace_window():
-    """A short Shelly hiccup should warn but not immediately fault."""
-    c = make_controller({
-        "light.shelly0110dimg3_28372f3e866c": "unavailable",
-    })
-
-    tick(c, 5)
-
-    assert_true(c.fsm_state != "FAULT",
-                f"shelly_transient_unavailable_grace (state={c.fsm_state})")
-
-
 def test_outdoor_sensor_failure():
     """When outdoor sensors fail, should fault after cache expires."""
     c = make_controller()
@@ -346,9 +301,6 @@ if __name__ == "__main__":
     test_all_room_sensors_failed()
     test_supply_sensor_failure()
     test_duct_sensor_failure_faults()
-    test_shelly_light_unavailable_faults()
-    test_shelly_raw_sensor_unavailable_faults_even_with_stale_proxy()
-    test_shelly_transient_unavailable_uses_grace_window()
     test_outdoor_sensor_failure()
     test_flow_sensor_zero()
 

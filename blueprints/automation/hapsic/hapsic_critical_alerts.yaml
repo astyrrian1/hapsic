@@ -65,21 +65,8 @@ triggers:
     id: "fsm_fault"
 
   - trigger: state
-    entity_id:
-      - sensor.hapsic_shelly_duct_temp
-      - sensor.hapsic_shelly_duct_rh
-      - light.shelly0110dimg3_28372f3e866c
-    to: "unavailable"
-    for:
-      minutes: 2
-    id: "shelly_offline"
-
-  - trigger: state
-    entity_id:
-      - sensor.hapsic_shelly_duct_temp
-      - sensor.hapsic_shelly_duct_rh
-      - light.shelly0110dimg3_28372f3e866c
-    to: "unknown"
+    entity_id: binary_sensor.hapsic_shelly_offline
+    to: "on"
     for:
       minutes: 2
     id: "shelly_offline"
