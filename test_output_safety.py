@@ -87,6 +87,11 @@ def assert_true(condition, label):
 BASE_STATES = {
     "input_number.humidifier_max_capacity": 2.7,
     "input_number.target_dew_point": 50.0,
+    "light.shelly0110dimg3_28372f3e866c": "off",
+    "sensor.shelly0110dimg3_28372f3e866c_temperature_2": 68.0,
+    "sensor.shelly0110dimg3_28372f3e866c_input_100_analog": 35.0,
+    "sensor.hapsic_cleansed_post_steam_temp": 68.0,
+    "sensor.hapsic_cleansed_post_steam_rh": 35.0,
     "sensor.hapsic_duct_temp": 68.0,
     "sensor.hapsic_duct_rh": 35.0,
     "sensor.hapsic_supply_flow": 400.0,
@@ -187,11 +192,13 @@ def test_voltage_zero_on_fault():
     # Kill all sensors to trigger fault
     c.states["sensor.hapsic_duct_temp"] = None
     c.states["sensor.hapsic_duct_rh"] = None
+    c.states["sensor.hapsic_cleansed_post_steam_temp"] = None
+    c.states["sensor.hapsic_cleansed_post_steam_rh"] = None
     c.states["sensor.hapsic_room_average_temp"] = None
     c.states["sensor.hapsic_room_average_rh"] = None
     c.states["sensor.hapsic_cleansed_inside_temp"] = None
     c.states["sensor.hapsic_cleansed_inside_rh"] = None
-    tick(c, 5)
+    tick(c, 13)
 
     assert_true(c.steam_voltage == 0.0,
                 f"fault_voltage_zero (V={c.steam_voltage}, state={c.fsm_state})")

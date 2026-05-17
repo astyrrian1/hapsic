@@ -44,6 +44,7 @@ variables:
   fault_messages:
     "Zero Flow": "⚠️ Airflow stopped. Humidifier parked. Check ventilation system power."
     "Sensor Failure": "🌡️ Sensor offline. Humidifier parked. Check sensor connections."
+    "Shelly Offline": "🔴 Shelly duct controller offline or unavailable. Check Shelly integration, power, and network."
     "CLOGGED FILTER": "🔴 Sustained supply/exhaust imbalance detected. Humidifier locked. Replace ERV filters and restart controller."
     "Defrost Active": "❄️ ERV defrost cycle. Humidifier temporarily parked. Will auto-resume."
     "Economizer Bypass": "🌀 ERV bypass open. Humidifier parked to prevent waste."
@@ -52,6 +53,7 @@ variables:
   fault_msg: >-
     {{ fault_messages.get(fault_reason,
        '🔧 Unknown fault: ' ~ fault_reason ~ '. Check HAPSIC logs.') }}
+  shelly_msg: "{{ fault_messages.get('Shelly Offline') }}"
 
 mode: single
 max_exceeded: silent
@@ -60,11 +62,30 @@ triggers:
   - trigger: state
     entity_id: sensor.hapsic_fsm_state
     to: "FAULT"
+    id: "fsm_fault"
+
+  - trigger: state
+    entity_id: binary_sensor.hapsic_shelly_offline
+    to: "on"
+    for:
+      minutes: 2
+    id: "shelly_offline"
 
 conditions: []
 
 actions:
   - choose:
+      - conditions:
+          - condition: trigger
+            id: "shelly_offline"
+          - condition: template
+            value_template: "{{ notify_svc == 'persistent_notification' }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: "🚨 HAPSIC Shelly Offline"
+              message: "{{ shelly_msg }}"
+              notification_id: "hapsic_shelly_offline"
       - conditions:
           - condition: template
             value_template: "{{ notify_svc == 'persistent_notification' }}"
@@ -77,7 +98,10 @@ actions:
     default:
       - action: "{{ notify_svc }}"
         data:
-          title: "🚨 HAPSIC Fault Alert"
-          message: "{{ fault_msg }}"
+          title: >-
+            {{ '🚨 HAPSIC Shelly Offline'
+               if trigger.id == 'shelly_offline'
+               else '🚨 HAPSIC Fault Alert' }}
+          message: "{{ shelly_msg if trigger.id == 'shelly_offline' else fault_msg }}"
   - delay:
       minutes: !input cooldown_minutes

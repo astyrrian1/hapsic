@@ -4,8 +4,8 @@ esphome:
   platformio_options:
     board_build.flash_mode: dio
     lib_deps:
-      - m5stack/M5Unified
-      - m5stack/M5GFX
+      - m5stack/M5Unified@0.2.13
+      - m5stack/M5GFX@0.2.19
     build_flags:
       - -DARDUINO_M5STACK_STAMPLC
       - -DARDUINO_USB_CDC_ON_BOOT=1

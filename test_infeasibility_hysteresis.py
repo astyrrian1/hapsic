@@ -104,6 +104,9 @@ def assert_equal(actual, expected, label):
 BASE_STATES = {
     "input_number.humidifier_max_capacity": 2.7,
     "input_number.target_dew_point": 50.0,
+    "light.shelly0110dimg3_28372f3e866c": "off",
+    "sensor.shelly0110dimg3_28372f3e866c_temperature_2": 68.0,
+    "sensor.shelly0110dimg3_28372f3e866c_input_100_analog": 35.0,
     "sensor.hapsic_cleansed_post_steam_temp": 68.0,
     "sensor.hapsic_cleansed_post_steam_rh": 35.0,
     "sensor.hapsic_supply_flow": 400.0,
