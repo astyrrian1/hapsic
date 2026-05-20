@@ -44,6 +44,7 @@ variables:
   fault_messages:
     "Zero Flow": "⚠️ Airflow stopped. Humidifier parked. Check ventilation system power."
     "Sensor Failure": "🌡️ Sensor offline. Humidifier parked. Check sensor connections."
+    "Duct RH Sensor Failure": "🌡️ Duct humidity sensor offline. Humidifier parked because duct saturation protection depends on RH."
     "Shelly Offline": "🔴 Shelly duct controller offline or unavailable. Check Shelly integration, power, and network."
     "CLOGGED FILTER": "🔴 Sustained supply/exhaust imbalance detected. Humidifier locked. Replace ERV filters and restart controller."
     "Defrost Active": "❄️ ERV defrost cycle. Humidifier temporarily parked. Will auto-resume."

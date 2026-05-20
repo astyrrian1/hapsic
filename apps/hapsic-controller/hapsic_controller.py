@@ -8,7 +8,6 @@ import appdaemon.plugins.hass.hassapi as hass
 
 class HapsicController(hass.Hass):
     SHELLY_LIGHT_ENTITY = "light.shelly0110dimg3_28372f3e866c"
-    SHELLY_DUCT_TEMP_ENTITY = "sensor.shelly0110dimg3_28372f3e866c_temperature_2"
     SHELLY_DUCT_RH_ENTITY = "sensor.shelly0110dimg3_28372f3e866c_input_100_analog"
     HAPSIC_DUCT_TEMP_ENTITY = "sensor.hapsic_cleansed_post_steam_temp"
     HAPSIC_DUCT_RH_ENTITY = "sensor.hapsic_cleansed_post_steam_rh"
@@ -85,6 +84,7 @@ class HapsicController(hass.Hass):
         self.last_valid_flow_time = 0
         self.shelly_offline_since = 0
         self.pending_fault_reason = None
+        self.duct_temp_fallback_active = False
 
         self.purge_ticks = 0
         self.turbo_wait_ticks = 0
@@ -233,23 +233,40 @@ class HapsicController(hass.Hass):
         return str(value).strip().lower() in {"unavailable", "unknown", "none", ""}
 
     def check_shelly_availability(self, now_time):
-        monitored = {
+        control_dependencies = {
             self.SHELLY_LIGHT_ENTITY: self.get_state(self.SHELLY_LIGHT_ENTITY),
-            self.SHELLY_DUCT_TEMP_ENTITY: self.get_state(self.SHELLY_DUCT_TEMP_ENTITY),
+        }
+        duct_rh_dependencies = {
             self.SHELLY_DUCT_RH_ENTITY: self.get_state(self.SHELLY_DUCT_RH_ENTITY),
-            self.HAPSIC_DUCT_TEMP_ENTITY: self.get_state(self.HAPSIC_DUCT_TEMP_ENTITY),
             self.HAPSIC_DUCT_RH_ENTITY: self.get_state(self.HAPSIC_DUCT_RH_ENTITY),
         }
-        offline = {
+        control_offline = {
             entity_id: state
-            for entity_id, state in monitored.items()
+            for entity_id, state in control_dependencies.items()
             if self.is_invalid_state(state)
         }
+        duct_rh_offline = {
+            entity_id: state
+            for entity_id, state in duct_rh_dependencies.items()
+            if self.is_invalid_state(state)
+        }
+        offline = {**control_offline, **duct_rh_offline}
 
         if not offline:
             self.shelly_offline_since = 0
             self.pending_fault_reason = None
             return True
+
+        if duct_rh_offline:
+            offline_detail = ", ".join(
+                f"{entity_id}={state!r}" for entity_id, state in duct_rh_offline.items()
+            )
+            self.pending_fault_reason = "Duct RH Sensor Failure"
+            self.log(
+                f"HAL CRITICAL: Duct RH dependency unavailable ({offline_detail}).",
+                level="ERROR",
+            )
+            return False
 
         if self.shelly_offline_since == 0:
             self.shelly_offline_since = now_time
@@ -278,16 +295,24 @@ class HapsicController(hass.Hass):
         try:
             now_time = time.time()
 
-            def safe_parse(t_val, rh_val):
-                if t_val is None or rh_val is None:
-                    return None, None
+            def safe_float(value):
+                if value is None:
+                    return None
                 invalid = {"unavailable", "unknown", "none", ""}
-                if str(t_val).strip().lower() in invalid or str(rh_val).strip().lower() in invalid:
-                    return None, None
+                if str(value).strip().lower() in invalid:
+                    return None
                 try:
-                    return float(t_val), float(rh_val)
+                    parsed = float(value)
                 except (ValueError, TypeError):
+                    return None
+                return None if math.isnan(parsed) else parsed
+
+            def safe_parse(t_val, rh_val):
+                parsed_t = safe_float(t_val)
+                parsed_rh = safe_float(rh_val)
+                if parsed_t is None or parsed_rh is None:
                     return None, None
+                return parsed_t, parsed_rh
 
             # --- Inside Conditions (Primary: House HA, Fallback: Extract CAN, Cache 30m) ---
             h_t = self.get_state("sensor.hapsic_room_average_temp")
@@ -400,20 +425,60 @@ class HapsicController(hass.Hass):
             # --- Post-Steam (Duct) with EMA Filter (with safe fallback + 30m cache) ---
             raw_duct_t_str = self.get_state(self.HAPSIC_DUCT_TEMP_ENTITY)
             raw_duct_rh_str = self.get_state(self.HAPSIC_DUCT_RH_ENTITY)
-            effective_duct_t, effective_duct_rh = safe_parse(raw_duct_t_str, raw_duct_rh_str)
+            effective_duct_t = safe_float(raw_duct_t_str)
+            effective_duct_rh = safe_float(raw_duct_rh_str)
+
+            if effective_duct_rh is None:
+                self.pending_fault_reason = "Duct RH Sensor Failure"
+                self.log(
+                    f"HAL CRITICAL: Duct RH sensor failed "
+                    f"(t={raw_duct_t_str!r}, rh={raw_duct_rh_str!r}).",
+                    level="ERROR",
+                )
+                return False
+
+            if effective_duct_t is None:
+                fallback_candidates = [
+                    getattr(self, "duct_t", None),
+                    self.duct_ema_t,
+                    self.supply_t,
+                    self.room_temp_avg,
+                    70.0,
+                ]
+                effective_duct_t = max(
+                    value
+                    for value in fallback_candidates
+                    if value is not None and not math.isnan(value)
+                )
+                self.duct_temp_fallback_active = True
+                self.log(
+                    f"HAL ALERT: Duct temp unavailable (t={raw_duct_t_str!r}); "
+                    f"using conservative fallback {effective_duct_t:.1f}F with RH {effective_duct_rh:.1f}%.",
+                    level="WARNING",
+                )
+            else:
+                self.duct_temp_fallback_active = False
 
             if effective_duct_t is not None and not math.isnan(effective_duct_t):
                 self.raw_duct_rh = effective_duct_rh
 
                 duct_alpha = 0.2
-                if self.duct_ema_t is None:
-                    self.duct_ema_t = effective_duct_t
-                    self.duct_ema_rh = effective_duct_rh
+                if self.duct_temp_fallback_active:
+                    self.duct_ema_t = max(self.duct_ema_t or effective_duct_t, effective_duct_t)
+                    if self.duct_ema_rh is None:
+                        self.duct_ema_rh = effective_duct_rh
+                    else:
+                        self.duct_ema_rh = (duct_alpha * effective_duct_rh) + ((1 - duct_alpha) * self.duct_ema_rh)
+                    self.duct_t = effective_duct_t
                 else:
-                    self.duct_ema_t = (duct_alpha * effective_duct_t) + ((1 - duct_alpha) * self.duct_ema_t)
-                    self.duct_ema_rh = (duct_alpha * effective_duct_rh) + ((1 - duct_alpha) * self.duct_ema_rh)
+                    if self.duct_ema_t is None:
+                        self.duct_ema_t = effective_duct_t
+                        self.duct_ema_rh = effective_duct_rh
+                    else:
+                        self.duct_ema_t = (duct_alpha * effective_duct_t) + ((1 - duct_alpha) * self.duct_ema_t)
+                        self.duct_ema_rh = (duct_alpha * effective_duct_rh) + ((1 - duct_alpha) * self.duct_ema_rh)
+                    self.duct_t = self.duct_ema_t
 
-                self.duct_t = self.duct_ema_t
                 self.duct_rh = self.duct_ema_rh
                 self.duct_dp, self.duct_w = self.calc_psychrometrics(self.duct_t, self.duct_rh)
                 self.last_valid_duct_time = now_time
@@ -1168,7 +1233,8 @@ class HapsicController(hass.Hass):
                 "pre_steam_dp": round(self.supply_dp, 2) if hasattr(self, 'supply_dp') else 0.0,
                 "post_steam_dp": round(self.duct_dp, 2) if hasattr(self, 'duct_dp') else 0.0,
                 "outdoor_dp": round(self.outdoor_dp, 2),
-                "bypass_state": self.bypass_state
+                "bypass_state": self.bypass_state,
+                "duct_temp_fallback_active": self.duct_temp_fallback_active,
             },
             "io": {
                 "steam_volts": round(self.steam_voltage, 2),
