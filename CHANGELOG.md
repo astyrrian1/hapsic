@@ -5,6 +5,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Duct temperature degraded mode**: Python AppDaemon and C++ firmware now continue operating when duct temperature is invalid but duct RH is valid, using a conservative warm fallback and publishing `psychrometrics.duct_temp_fallback_active` telemetry.
+
+### Changed
+- **Duct sensor fault policy**: Duct RH remains safety-critical and now reports `Duct RH Sensor Failure`; duct temperature no longer triggers Shelly/offline faults by itself.
+
 ## [v2.7.2] — 2026-05-17
 
 ### Added

@@ -229,6 +229,9 @@ class HapsicController : public PollingComponent {
   void set_tel_feasibility_is_infeasible(binary_sensor::BinarySensor *s) { tel_feasibility_is_infeasible_ = s; }
   void set_tel_batch_boil_achieved(binary_sensor::BinarySensor *s) { tel_batch_boil_achieved_ = s; }
   void set_tel_batch_stasis_active(binary_sensor::BinarySensor *s) { tel_batch_stasis_active_ = s; }
+  void set_tel_psychro_duct_temp_fallback_active(binary_sensor::BinarySensor *s) {
+    tel_psychro_duct_temp_fallback_active_ = s;
+  }
 
   void set_tel_limiters_active_limit(text_sensor::TextSensor *s) { tel_limiters_active_limit_ = s; }
 
@@ -294,6 +297,7 @@ class HapsicController : public PollingComponent {
   // FSM
   State fsm_state_ = STANDBY;
   std::string fault_reason_ = "NONE";
+  std::string pending_sensor_fault_reason_ = "Sensor Failure";
 
   // Feasibility Horizon
   bool is_target_infeasible_ = false;
@@ -357,6 +361,7 @@ class HapsicController : public PollingComponent {
   float duct_temp_ = 0.0f;
   float duct_rh_ = 0.0f;
   float raw_duct_rh_ = 0.0f;
+  bool duct_temp_fallback_active_ = false;
 
   // EMA state
   float ema_duct_temp_ = 0.0f;
@@ -497,6 +502,7 @@ class HapsicController : public PollingComponent {
   binary_sensor::BinarySensor *tel_feasibility_is_infeasible_ = nullptr;
   binary_sensor::BinarySensor *tel_batch_boil_achieved_ = nullptr;
   binary_sensor::BinarySensor *tel_batch_stasis_active_ = nullptr;
+  binary_sensor::BinarySensor *tel_psychro_duct_temp_fallback_active_ = nullptr;
 
   text_sensor::TextSensor *tel_limiters_active_limit_ = nullptr;
   text_sensor::TextSensor *tel_health_boil_status_ = nullptr;

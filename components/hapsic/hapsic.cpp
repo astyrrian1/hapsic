@@ -264,7 +264,7 @@ void HapsicController::update() {
   bool sensors_ok = read_sensors();
   if (!sensors_ok) {
     if (fsm_state_ != INITIALIZING) {
-      trigger_fault("Sensor Failure");
+      trigger_fault(pending_sensor_fault_reason_);
     }
     write_output();
     publish_telemetry();
@@ -348,28 +348,7 @@ const char *HapsicController::state_name(State s) {
 // =============================================================================
 
 bool HapsicController::read_sensors() {
-  // --- Duct sensors (local hardware — always available) ---
-  float raw_duct_temp = sensor_value(duct_temp_sensor_);
-  float raw_duct_rh = sensor_value(duct_rh_sensor_);
-
-  if (std::isnan(raw_duct_temp) || std::isnan(raw_duct_rh)) {
-    ESP_LOGW("hapsic", "Duct sensor NaN — temp=%.1f rh=%.1f", raw_duct_temp, raw_duct_rh);
-    return false;
-  }
-
-  raw_duct_rh_ = raw_duct_rh;
-  ema_duct_temp_ = ema(raw_duct_temp, ema_duct_temp_, ema_duct_initialized_);
-  ema_duct_rh_ = ema(raw_duct_rh, ema_duct_rh_, ema_duct_initialized_);
-  ema_duct_initialized_ = true;
-
-  duct_temp_ = ema_duct_temp_;
-  duct_rh_ = ema_duct_rh_;
-
-  auto duct_psych = MagnusTetens::calculate(duct_temp_, duct_rh_, P_ATM);
-  if (duct_psych.is_valid) {
-    duct_dp_ = duct_psych.dew_point_c;
-    duct_w_ = duct_psych.mixing_ratio_g_kg;
-  }
+  pending_sensor_fault_reason_ = "Sensor Failure";
 
   // --- Supply flow & bypass (CAN) ---
   float raw_flow = sensor_value(supply_flow_sensor_);
@@ -485,6 +464,46 @@ bool HapsicController::read_sensors() {
       ESP_LOGE("hapsic", "CRITICAL: All Supply sensors failed and cache expired (>30m).");
       return false;
     }
+  }
+
+  // --- Duct RH is critical; duct temperature can degrade to a warm fallback. ---
+  float raw_duct_temp = sensor_value(duct_temp_sensor_);
+  float raw_duct_rh = sensor_value(duct_rh_sensor_);
+
+  if (std::isnan(raw_duct_rh)) {
+    pending_sensor_fault_reason_ = "Duct RH Sensor Failure";
+    ESP_LOGE("hapsic", "CRITICAL: Duct RH sensor NaN — temp=%.1f rh=%.1f", raw_duct_temp, raw_duct_rh);
+    return false;
+  }
+
+  raw_duct_rh_ = raw_duct_rh;
+  ema_duct_rh_ = ema(raw_duct_rh, ema_duct_rh_, ema_duct_initialized_);
+  duct_rh_ = ema_duct_rh_;
+
+  if (std::isnan(raw_duct_temp)) {
+    float fallback_temp = 21.1f;
+    if (!std::isnan(duct_temp_))
+      fallback_temp = std::max(fallback_temp, duct_temp_);
+    if (!std::isnan(supply_t_))
+      fallback_temp = std::max(fallback_temp, supply_t_);
+    if (!std::isnan(house_temp_avg_))
+      fallback_temp = std::max(fallback_temp, house_temp_avg_);
+
+    duct_temp_fallback_active_ = true;
+    duct_temp_ = fallback_temp;
+    ema_duct_temp_ = std::max(ema_duct_temp_, fallback_temp);
+    ESP_LOGW("hapsic", "Duct temp NaN. Using conservative fallback %.1fC with RH %.1f%%.", duct_temp_, duct_rh_);
+  } else {
+    duct_temp_fallback_active_ = false;
+    ema_duct_temp_ = ema(raw_duct_temp, ema_duct_temp_, ema_duct_initialized_);
+    duct_temp_ = ema_duct_temp_;
+  }
+  ema_duct_initialized_ = true;
+
+  auto duct_psych = MagnusTetens::calculate(duct_temp_, duct_rh_, P_ATM);
+  if (duct_psych.is_valid) {
+    duct_dp_ = duct_psych.dew_point_c;
+    duct_w_ = duct_psych.mixing_ratio_g_kg;
   }
 
   // --- Outdoor conditions (CAN — reports in °C after filter) ---
@@ -1258,6 +1277,8 @@ void HapsicController::publish_telemetry() {
     tel_batch_boil_achieved_->publish_state(boil_achieved_);
   if (tel_batch_stasis_active_)
     tel_batch_stasis_active_->publish_state(stasis_active_);
+  if (tel_psychro_duct_temp_fallback_active_)
+    tel_psychro_duct_temp_fallback_active_->publish_state(duct_temp_fallback_active_);
 
   if (tel_limiters_active_limit_)
     tel_limiters_active_limit_->publish_state(active_limit_);
@@ -1283,7 +1304,7 @@ void HapsicController::publish_telemetry() {
            "\"limiters\":{\"ceiling_volts\":%.2f,\"active_limit\":\"%s\"},"
            "\"physics\":{\"duct_derivative\":%.2f,\"structure_velocity\":%.2f},"
            "\"psychrometrics\":{\"pre_steam_dp\":%.2f,\"outdoor_dp\":%.2f,"
-           "\"duct_rh_ema\":%.2f},"
+           "\"duct_rh_ema\":%.2f,\"duct_temp_fallback_active\":%s},"
            "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
            "\"advisory\":{\"economy_active\":%s,\"economy_severe\":%s,"
            "\"steaming_active\":%s,\"useful_demand\":%s,"
@@ -1303,15 +1324,16 @@ void HapsicController::publish_telemetry() {
            "false", target_duct_dp_, target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term, loop_b_i_term,
            integrator_b_, "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
            stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), duct_derivative_,
-           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, steam_voltage_, steam_mass_kg_hr_,
-           economy_advisory_active_ ? "true" : "false", economy_advisory_severe_ ? "true" : "false",
-           economy_steaming_active_ ? "true" : "false", economy_useful_demand_ ? "true" : "false",
-           economy_passive_import_candidate_ ? "true" : "false", economy_passive_import_lbs_hr_,
-           economy_passive_export_lbs_hr_, economy_advisory_reason_.c_str(), economy_negative_streak_sec_ / 60.0f,
-           economy_severe_streak_sec_ / 60.0f, economy_recovery_streak_sec_ / 60.0f, economy_advisory_target_delta_,
-           1.0f, chi_ema_, boil_status_.c_str(), get_effective_max_capacity(), last_measured_steam_, prod_eff,
-           boiler_curve_[0], boiler_curve_[1], boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0],
-           boiler_curve_counts_[1], boiler_curve_counts_[2], boiler_curve_counts_[3]);
+           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, duct_temp_fallback_active_ ? "true" : "false",
+           steam_voltage_, steam_mass_kg_hr_, economy_advisory_active_ ? "true" : "false",
+           economy_advisory_severe_ ? "true" : "false", economy_steaming_active_ ? "true" : "false",
+           economy_useful_demand_ ? "true" : "false", economy_passive_import_candidate_ ? "true" : "false",
+           economy_passive_import_lbs_hr_, economy_passive_export_lbs_hr_, economy_advisory_reason_.c_str(),
+           economy_negative_streak_sec_ / 60.0f, economy_severe_streak_sec_ / 60.0f,
+           economy_recovery_streak_sec_ / 60.0f, economy_advisory_target_delta_, 1.0f, chi_ema_, boil_status_.c_str(),
+           get_effective_max_capacity(), last_measured_steam_, prod_eff, boiler_curve_[0], boiler_curve_[1],
+           boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
+           boiler_curve_counts_[2], boiler_curve_counts_[3]);
 
 #ifdef USE_MQTT
   if (mqtt::global_mqtt_client != nullptr) {

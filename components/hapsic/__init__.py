@@ -75,6 +75,7 @@ TELEMETRY_BINARY_SENSORS = [
     "tel_feasibility_is_infeasible",
     "tel_batch_boil_achieved",
     "tel_batch_stasis_active",
+    "tel_psychro_duct_temp_fallback_active",
 ]
 
 TELEMETRY_TEXT_SENSORS = [

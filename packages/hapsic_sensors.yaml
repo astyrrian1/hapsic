@@ -189,14 +189,10 @@ template:
         icon: mdi:alert-octagon
         state: >
           {% set invalid = ['unavailable', 'unknown', 'none', ''] %}
-          {% set raw_temp = states('sensor.shelly0110dimg3_28372f3e866c_temperature_2') %}
           {% set raw_rh = states('sensor.shelly0110dimg3_28372f3e866c_input_100_analog') %}
-          {% set proxy_temp = states('sensor.hapsic_shelly_duct_temp') %}
           {% set proxy_rh = states('sensor.hapsic_shelly_duct_rh') %}
           {% set actuator = states('light.shelly0110dimg3_28372f3e866c') %}
-          {{ raw_temp | lower in invalid
-             or raw_rh | lower in invalid
-             or proxy_temp | lower in invalid
+          {{ raw_rh | lower in invalid
              or proxy_rh | lower in invalid
              or actuator | lower in invalid }}
 
@@ -296,6 +292,15 @@ mqtt:
         {% set adv = value_json.advisory | default({}) %}
         {{ 'ON' if adv.economy_active | default(false) else 'OFF' }}
       icon: mdi:leaf-circle-outline
+
+    - name: "HAPSIC Duct Temp Fallback Active"
+      unique_id: hapsic_duct_temp_fallback_active
+      state_topic: "hapsic/telemetry/state"
+      value_template: >
+        {% set psy = value_json.psychrometrics | default({}) %}
+        {{ 'ON' if psy.duct_temp_fallback_active | default(false) else 'OFF' }}
+      device_class: problem
+      icon: mdi:thermometer-alert
 
     - name: "HAPSIC Economy Advisory Severe"
       unique_id: hapsic_economy_advisory_severe

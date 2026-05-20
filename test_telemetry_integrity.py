@@ -113,6 +113,7 @@ def test_telemetry_schema_integrity():
     controller.chi_ema = 0.94
     controller.boil_status = "BOILING"
     controller.bypass_state = 0.0
+    controller.duct_temp_fallback_active = True
     controller.fsm_state = "ACTIVE_CRUISE"
     controller.room_dp_buffer = [39.0, 39.5, 40.0]
 
@@ -147,6 +148,7 @@ def test_telemetry_schema_integrity():
         "room_avg_rh": 35.2,
         "room_avg_temp": 68.1,
         "outdoor_dp": 42.0,
+        "duct_temp_fallback_active": True,
     }
     for key, expected in checks.items():
         actual = psych.get(key)

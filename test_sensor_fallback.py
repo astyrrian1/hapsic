@@ -243,22 +243,54 @@ def test_supply_sensor_failure():
                 "supply_cache_hit")
 
 
-def test_duct_sensor_failure_faults():
-    """When duct sensors fail (no float), should trigger sensor failure after cache expires."""
+def test_duct_temp_failure_uses_conservative_fallback():
+    """Duct temp loss should degrade to a conservative fallback when duct RH remains valid."""
     c = make_controller()
     tick(c, 3)
 
-    # Kill duct sensors entirely
+    # Kill only duct temp. Duct RH remains the safety-critical signal.
     c.states["sensor.hapsic_cleansed_post_steam_temp"] = "unavailable"
-    c.states["sensor.hapsic_cleansed_post_steam_rh"] = "unavailable"
 
-    # Advance past 30-minute cache window (1800s) then tick
+    # Advance past the old cache window; temp fallback should still avoid FAULT.
     c._mock_time[0] += 1900
     tick(c, 5)
 
-    # Should fault or park to safety after cache expires
-    assert_true(c.fsm_state == "FAULT" or c.steam_voltage == 0.0,
-                f"duct_failure_faults (state={c.fsm_state})")
+    assert_true(c.fsm_state != "FAULT",
+                f"duct_temp_failure_degraded (state={c.fsm_state}, reason={c.fault_reason})")
+    assert_true(c.duct_temp_fallback_active is True,
+                "duct_temp_fallback_flag_active")
+    assert_close(c.duct_t, 70.0, 0.001, "duct_temp_fallback_floor")
+
+
+def test_duct_temp_fallback_uses_warmest_candidate():
+    """Fallback temp should use the warmest of previous duct, supply, room, and 70°F."""
+    c = make_controller({
+        "sensor.hapsic_cleansed_supply_temp": 75.0,
+        "sensor.hapsic_room_average_temp": 69.0,
+        "sensor.hapsic_cleansed_post_steam_temp": "unavailable",
+        "sensor.hapsic_cleansed_post_steam_rh": 35.0,
+    })
+
+    tick(c, 2)
+
+    assert_true(c.fsm_state != "FAULT",
+                f"duct_temp_warmest_candidate_no_fault (state={c.fsm_state})")
+    assert_close(c.duct_t, 75.0, 0.001, "duct_temp_fallback_warmest_supply")
+
+
+def test_duct_rh_failure_faults_with_specific_reason():
+    """Duct RH loss remains critical because saturation protection depends on it."""
+    c = make_controller({
+        "sensor.shelly0110dimg3_28372f3e866c_input_100_analog": "unavailable",
+        "sensor.hapsic_cleansed_post_steam_rh": "unavailable",
+    })
+
+    tick(c, 1)
+
+    assert_true(c.fsm_state == "FAULT",
+                f"duct_rh_failure_faults (state={c.fsm_state})")
+    assert_true(c.fault_reason == "Duct RH Sensor Failure",
+                f"duct_rh_fault_reason ({c.fault_reason})")
 
 
 def test_shelly_light_unavailable_faults():
@@ -275,8 +307,8 @@ def test_shelly_light_unavailable_faults():
                 f"shelly_light_fault_reason ({c.fault_reason})")
 
 
-def test_shelly_raw_sensor_unavailable_faults_even_with_stale_proxy():
-    """Raw Shelly sensor loss should fault even when cleansed proxy still has a numeric stale value."""
+def test_shelly_raw_temp_unavailable_does_not_fault_with_proxy():
+    """Raw Shelly temp loss is degraded-only when the AppDaemon duct proxy is still numeric."""
     c = make_controller({
         "sensor.shelly0110dimg3_28372f3e866c_temperature_2": "unavailable",
         "sensor.hapsic_cleansed_post_steam_temp": 68.0,
@@ -285,10 +317,8 @@ def test_shelly_raw_sensor_unavailable_faults_even_with_stale_proxy():
 
     tick(c, 13)
 
-    assert_true(c.fsm_state == "FAULT",
-                f"shelly_raw_sensor_unavailable_faults (state={c.fsm_state})")
-    assert_true(c.fault_reason == "Shelly Offline",
-                f"shelly_raw_sensor_fault_reason ({c.fault_reason})")
+    assert_true(c.fsm_state != "FAULT",
+                f"shelly_raw_temp_unavailable_degraded (state={c.fsm_state}, reason={c.fault_reason})")
 
 
 def test_shelly_transient_unavailable_uses_grace_window():
@@ -345,9 +375,11 @@ if __name__ == "__main__":
     test_room_unknown_string()
     test_all_room_sensors_failed()
     test_supply_sensor_failure()
-    test_duct_sensor_failure_faults()
+    test_duct_temp_failure_uses_conservative_fallback()
+    test_duct_temp_fallback_uses_warmest_candidate()
+    test_duct_rh_failure_faults_with_specific_reason()
     test_shelly_light_unavailable_faults()
-    test_shelly_raw_sensor_unavailable_faults_even_with_stale_proxy()
+    test_shelly_raw_temp_unavailable_does_not_fault_with_proxy()
     test_shelly_transient_unavailable_uses_grace_window()
     test_outdoor_sensor_failure()
     test_flow_sensor_zero()
