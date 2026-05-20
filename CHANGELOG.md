@@ -5,11 +5,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.7.3] — 2026-05-20
+
 ### Added
 - **Duct temperature degraded mode**: Python AppDaemon and C++ firmware now continue operating when duct temperature is invalid but duct RH is valid, using a conservative warm fallback and publishing `psychrometrics.duct_temp_fallback_active` telemetry.
 
 ### Changed
 - **Duct sensor fault policy**: Duct RH remains safety-critical and now reports `Duct RH Sensor Failure`; duct temperature no longer triggers Shelly/offline faults by itself.
+
+### Deployment Notes
+After installing this release via HACS:
+1. Restart AppDaemon to load the updated Python controller.
+2. Flash firmware to StamPLC unit(s) if using native ESPHome telemetry.
+3. Copy or update `packages/hapsic_sensors.yaml` in Home Assistant and restart Home Assistant Core so `binary_sensor.hapsic_duct_temp_fallback_active` is created.
+4. Re-import or update the HAPSIC Critical Fault Alerts blueprint if you use it.
 
 ## [v2.7.2] — 2026-05-17
 
