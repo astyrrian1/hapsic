@@ -5,6 +5,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.7.4] — 2026-05-22
+
+### Added
+- **Sensor data loss debounce/cache**: Python AppDaemon and C++ ESPHome controllers now keep using each raw sensor's last good numeric value for brief sensor dropouts up to 60 seconds, reducing nuisance faults during transient HA/CAN data loss.
+
+### Changed
+- **Duct RH fault timing**: Duct RH remains safety-critical, but short startup/transient losses now wait through the 60-second debounce window before raising `Duct RH Sensor Failure`.
+
+### Deployment Notes
+After installing this release via HACS:
+1. Restart AppDaemon to load the updated Python controller.
+2. Flash firmware to StamPLC unit(s) if using native ESPHome telemetry.
+
 ## [v2.7.3] — 2026-05-20
 
 ### Added

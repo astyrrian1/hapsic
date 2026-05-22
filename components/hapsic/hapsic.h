@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include "esphome/core/component.h"
@@ -90,6 +91,13 @@ struct HapsicPersist {
   float cached_target_rh;
   float boiler_curve[4];  // [2-4V), [4-6V), [6-8V), [8-10V] EMA lbs/hr
   uint32_t magic;         // 0xABCD1235 = valid data (bumped from 1234 for migration)
+};
+
+struct SensorLossCache {
+  float value = std::numeric_limits<float>::quiet_NaN();
+  uint32_t last_valid_ms = 0;
+  uint32_t missing_since_ms = 0;
+  bool has_value = false;
 };
 
 // =============================================================================
@@ -265,6 +273,7 @@ class HapsicController : public PollingComponent {
   static constexpr int PURGE_MAX_TICKS = 120;
   static constexpr int CLOGGED_FILTER_TICKS = 2880;
   static constexpr int DEADMAN_TIMEOUT_MS = 120000;
+  static constexpr uint32_t SENSOR_LOSS_GRACE_MS = 60000;
   static constexpr int BOILING_MIN_TICKS = 120;
   static constexpr float BOILING_MIN_VOLTAGE = 1.0f;
   static constexpr float DEFAULT_TARGET_DP = 4.4f;        // 40F in C default
@@ -374,6 +383,28 @@ class HapsicController : public PollingComponent {
   float cached_target_dp_ = DEFAULT_TARGET_DP;
   float cached_extract_temp_ = NAN;
   float cached_extract_rh_ = NAN;
+
+  // Short raw-sensor debounce cache for transient HA/CAN dropouts.
+  SensorLossCache duct_temp_cache_;
+  SensorLossCache duct_rh_cache_;
+  SensorLossCache supply_flow_cache_;
+  SensorLossCache extract_flow_cache_;
+  SensorLossCache bypass_cache_;
+  SensorLossCache bypass_ha_cache_;
+  SensorLossCache outdoor_temp_cache_;
+  SensorLossCache outdoor_rh_cache_;
+  SensorLossCache house_temp_cache_;
+  SensorLossCache house_rh_cache_;
+  SensorLossCache extract_can_temp_cache_;
+  SensorLossCache extract_can_rh_cache_;
+  SensorLossCache extract_ha_temp_cache_;
+  SensorLossCache extract_ha_rh_cache_;
+  SensorLossCache supply_can_temp_cache_;
+  SensorLossCache supply_can_rh_cache_;
+  SensorLossCache supply_ha_temp_cache_;
+  SensorLossCache supply_ha_rh_cache_;
+  SensorLossCache target_dew_point_cache_;
+  SensorLossCache max_capacity_cache_;
 
   // Diagnostics
   float chi_ema_ = 1.0f;
@@ -512,6 +543,7 @@ class HapsicController : public PollingComponent {
   // =========================================================================
   float ema(float current, float previous, bool initialized);
   float sensor_value(sensor::Sensor *s);
+  float cached_sensor_value(sensor::Sensor *s, SensorLossCache &cache);
 
   bool read_sensors();
   bool execute_interlocks();
