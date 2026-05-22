@@ -278,14 +278,41 @@ def test_duct_temp_fallback_uses_warmest_candidate():
     assert_close(c.duct_t, 75.0, 0.001, "duct_temp_fallback_warmest_supply")
 
 
-def test_duct_rh_failure_faults_with_specific_reason():
-    """Duct RH loss remains critical because saturation protection depends on it."""
+def test_duct_rh_brief_loss_uses_cached_value():
+    """A brief duct RH dropout should keep using the last good RH value."""
+    c = make_controller()
+    tick(c, 2)
+
+    c.states["sensor.shelly0110dimg3_28372f3e866c_input_100_analog"] = "unavailable"
+    c.states["sensor.hapsic_cleansed_post_steam_rh"] = "unavailable"
+    tick(c, 5)
+
+    assert_true(c.fsm_state != "FAULT",
+                f"duct_rh_cached_no_fault (state={c.fsm_state})")
+    assert_close(c.raw_duct_rh, 35.0, 0.001, "duct_rh_cached_value")
+
+
+def test_duct_rh_transient_loss_uses_grace_window():
+    """Short duct RH loss should wait in the 60s debounce window before faulting."""
     c = make_controller({
         "sensor.shelly0110dimg3_28372f3e866c_input_100_analog": "unavailable",
         "sensor.hapsic_cleansed_post_steam_rh": "unavailable",
     })
 
     tick(c, 1)
+
+    assert_true(c.fsm_state != "FAULT",
+                f"duct_rh_transient_no_immediate_fault (state={c.fsm_state})")
+
+
+def test_duct_rh_failure_faults_with_specific_reason_after_debounce():
+    """Duct RH loss remains critical after the debounce window expires."""
+    c = make_controller({
+        "sensor.shelly0110dimg3_28372f3e866c_input_100_analog": "unavailable",
+        "sensor.hapsic_cleansed_post_steam_rh": "unavailable",
+    })
+
+    tick(c, 13)
 
     assert_true(c.fsm_state == "FAULT",
                 f"duct_rh_failure_faults (state={c.fsm_state})")
@@ -377,7 +404,9 @@ if __name__ == "__main__":
     test_supply_sensor_failure()
     test_duct_temp_failure_uses_conservative_fallback()
     test_duct_temp_fallback_uses_warmest_candidate()
-    test_duct_rh_failure_faults_with_specific_reason()
+    test_duct_rh_brief_loss_uses_cached_value()
+    test_duct_rh_transient_loss_uses_grace_window()
+    test_duct_rh_failure_faults_with_specific_reason_after_debounce()
     test_shelly_light_unavailable_faults()
     test_shelly_raw_temp_unavailable_does_not_fault_with_proxy()
     test_shelly_transient_unavailable_uses_grace_window()

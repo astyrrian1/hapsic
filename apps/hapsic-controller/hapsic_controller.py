@@ -12,10 +12,11 @@ class HapsicController(hass.Hass):
     HAPSIC_DUCT_TEMP_ENTITY = "sensor.hapsic_cleansed_post_steam_temp"
     HAPSIC_DUCT_RH_ENTITY = "sensor.hapsic_cleansed_post_steam_rh"
     SHELLY_OFFLINE_FAULT_SECONDS = 60.0
+    SENSOR_LOSS_GRACE_SECONDS = 60.0
 
     def initialize(self):
         """
-        HAPSIC 2.7.2
+        HAPSIC 2.7.4
         Includes:
         1. Absolute Dew Point Setpoint Paradigm.
         2. Real-time Building Physics Mass Balance (1380 CFM50 / 17.0 N-Factor).
@@ -83,6 +84,7 @@ class HapsicController(hass.Hass):
         self.last_valid_duct_time = 0
         self.last_valid_flow_time = 0
         self.shelly_offline_since = 0
+        self.sensor_value_cache = {}
         self.pending_fault_reason = None
         self.duct_temp_fallback_active = False
 
@@ -232,14 +234,63 @@ class HapsicController(hass.Hass):
             return True
         return str(value).strip().lower() in {"unavailable", "unknown", "none", ""}
 
+    @staticmethod
+    def parse_sensor_float(value):
+        if HapsicController.is_invalid_state(value):
+            return None
+        try:
+            parsed = float(value)
+        except (ValueError, TypeError):
+            return None
+        return None if math.isnan(parsed) else parsed
+
+    def cached_sensor_float(self, entity_id, now_time):
+        raw_value = self.get_state(entity_id)
+        parsed = self.parse_sensor_float(raw_value)
+        cache = self.sensor_value_cache.setdefault(
+            entity_id,
+            {"value": None, "last_valid": 0.0, "missing_since": 0.0},
+        )
+
+        if parsed is not None:
+            cache["value"] = parsed
+            cache["last_valid"] = now_time
+            cache["missing_since"] = 0.0
+            return parsed, raw_value, False
+
+        if cache["missing_since"] == 0.0:
+            cache["missing_since"] = now_time
+
+        last_valid_age = now_time - cache["last_valid"] if cache["last_valid"] > 0.0 else math.inf
+        if cache["value"] is not None and last_valid_age < self.SENSOR_LOSS_GRACE_SECONDS:
+            return cache["value"], raw_value, True
+
+        return None, raw_value, False
+
     def check_shelly_availability(self, now_time):
         control_dependencies = {
             self.SHELLY_LIGHT_ENTITY: self.get_state(self.SHELLY_LIGHT_ENTITY),
         }
-        duct_rh_dependencies = {
-            self.SHELLY_DUCT_RH_ENTITY: self.get_state(self.SHELLY_DUCT_RH_ENTITY),
-            self.HAPSIC_DUCT_RH_ENTITY: self.get_state(self.HAPSIC_DUCT_RH_ENTITY),
-        }
+        duct_rh_dependencies = {}
+        for entity_id in (self.SHELLY_DUCT_RH_ENTITY, self.HAPSIC_DUCT_RH_ENTITY):
+            value, raw_state, from_cache = self.cached_sensor_float(entity_id, now_time)
+            if value is None:
+                cache = self.sensor_value_cache[entity_id]
+                loss_age = now_time - cache["missing_since"]
+                if loss_age < self.SENSOR_LOSS_GRACE_SECONDS:
+                    self.log(
+                        f"HAL ALERT: {entity_id} unavailable for {loss_age:.0f}s "
+                        f"({raw_state!r}). Waiting for recovery.",
+                        level="WARNING",
+                    )
+                else:
+                    duct_rh_dependencies[entity_id] = raw_state
+            elif from_cache:
+                self.log(
+                    f"HAL ALERT: {entity_id} unavailable ({raw_state!r}); "
+                    f"using cached value for up to {self.SENSOR_LOSS_GRACE_SECONDS:.0f}s.",
+                    level="WARNING",
+                )
         control_offline = {
             entity_id: state
             for entity_id, state in control_dependencies.items()
@@ -295,42 +346,39 @@ class HapsicController(hass.Hass):
         try:
             now_time = time.time()
 
-            def safe_float(value):
-                if value is None:
-                    return None
-                invalid = {"unavailable", "unknown", "none", ""}
-                if str(value).strip().lower() in invalid:
-                    return None
-                try:
-                    parsed = float(value)
-                except (ValueError, TypeError):
-                    return None
-                return None if math.isnan(parsed) else parsed
+            def safe_sensor(entity_id):
+                return self.cached_sensor_float(entity_id, now_time)
 
-            def safe_parse(t_val, rh_val):
-                parsed_t = safe_float(t_val)
-                parsed_rh = safe_float(rh_val)
+            def safe_parse(t_entity, rh_entity):
+                parsed_t, raw_t, cached_t = safe_sensor(t_entity)
+                parsed_rh, raw_rh, cached_rh = safe_sensor(rh_entity)
                 if parsed_t is None or parsed_rh is None:
-                    return None, None
-                return parsed_t, parsed_rh
+                    return None, None, raw_t, raw_rh, cached_t or cached_rh
+                return parsed_t, parsed_rh, raw_t, raw_rh, cached_t or cached_rh
 
             # --- Inside Conditions (Primary: House HA, Fallback: Extract CAN, Cache 30m) ---
-            h_t = self.get_state("sensor.hapsic_room_average_temp")
-            h_rh = self.get_state("sensor.hapsic_room_average_rh")
-            e_t = self.get_state("sensor.hapsic_cleansed_inside_temp")
-            e_rh = self.get_state("sensor.hapsic_cleansed_inside_rh")
+            h_t_entity = "sensor.hapsic_room_average_temp"
+            h_rh_entity = "sensor.hapsic_room_average_rh"
+            e_t_entity = "sensor.hapsic_cleansed_inside_temp"
+            e_rh_entity = "sensor.hapsic_cleansed_inside_rh"
+            h_t = self.get_state(h_t_entity)
+            h_rh = self.get_state(h_rh_entity)
+            e_t = self.get_state(e_t_entity)
+            e_rh = self.get_state(e_rh_entity)
             self.log(
                 f"HAL DEBUG: room_avg_t={h_t!r}, room_avg_rh={h_rh!r}, "
                 f"extract_t={e_t!r}, extract_rh={e_rh!r}",
                 level="DEBUG",
             )
 
-            effective_room_t, effective_room_rh = safe_parse(h_t, h_rh)
+            effective_room_t, effective_room_rh, _, _, room_cached = safe_parse(h_t_entity, h_rh_entity)
             if effective_room_t is None:
                 self.log("HAL DEBUG: Primary room sensors invalid, falling back to extract CAN.", level="DEBUG")
-                effective_room_t, effective_room_rh = safe_parse(e_t, e_rh)
+                effective_room_t, effective_room_rh, _, _, room_cached = safe_parse(e_t_entity, e_rh_entity)
 
             if effective_room_t is not None and not math.isnan(effective_room_t):
+                if room_cached:
+                    self.log("HAL ALERT: Inside sensor loss debounced with cached value.", level="WARNING")
                 self.room_dp, self.room_w = self.calc_psychrometrics(effective_room_t, effective_room_rh)
                 self.room_temp_avg = effective_room_t
                 self.room_rh_avg = effective_room_rh
@@ -354,9 +402,12 @@ class HapsicController(hass.Hass):
                     return False
 
             # --- Config Inputs (with safe fallback) ---
-            raw_target_dp = self.get_state("input_number.target_dew_point")
-            raw_max_cap = self.get_state("input_number.humidifier_max_capacity")
-            cfg_target, _ = safe_parse(raw_target_dp, raw_max_cap)
+            target_entity = "input_number.target_dew_point"
+            max_cap_entity = "input_number.humidifier_max_capacity"
+            cfg_target, cfg_max_cap, raw_target_dp, raw_max_cap, cfg_cached = safe_parse(
+                target_entity,
+                max_cap_entity,
+            )
             if cfg_target is None:
                 self.log(
                     f"HAL ALERT: Config inputs unavailable "
@@ -365,15 +416,22 @@ class HapsicController(hass.Hass):
                     level="WARNING",
                 )
             else:
-                self.target_room_dp = float(raw_target_dp)
-                self.MAX_CAPACITY = float(raw_max_cap)
+                if cfg_cached:
+                    self.log("HAL ALERT: Config input loss debounced with cached value.", level="WARNING")
+                self.target_room_dp = cfg_target
+                self.MAX_CAPACITY = cfg_max_cap
 
             # --- Outdoor Data (with safe fallback + 30m cache) ---
-            raw_out_t = self.get_state("sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature")
-            raw_out_rh = self.get_state("sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity")
-            effective_out_t, effective_out_rh = safe_parse(raw_out_t, raw_out_rh)
+            out_t_entity = "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature"
+            out_rh_entity = "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_humidity"
+            effective_out_t, effective_out_rh, raw_out_t, raw_out_rh, out_cached = safe_parse(
+                out_t_entity,
+                out_rh_entity,
+            )
 
             if effective_out_t is not None and not math.isnan(effective_out_t):
+                if out_cached:
+                    self.log("HAL ALERT: Outdoor sensor loss debounced with cached value.", level="WARNING")
                 self.outdoor_dp, self.outdoor_w = self.calc_psychrometrics(effective_out_t, effective_out_rh)
                 self.last_valid_outdoor_time = now_time
             else:
@@ -395,12 +453,14 @@ class HapsicController(hass.Hass):
                     return False
 
             # --- Supply / Pre-Steam (CLEANSED) ---
-            s_t = self.get_state("sensor.hapsic_cleansed_supply_temp")
-            s_rh = self.get_state("sensor.hapsic_cleansed_supply_rh")
+            s_t_entity = "sensor.hapsic_cleansed_supply_temp"
+            s_rh_entity = "sensor.hapsic_cleansed_supply_rh"
 
-            effective_sup_t, effective_sup_rh = safe_parse(s_t, s_rh)
+            effective_sup_t, effective_sup_rh, s_t, s_rh, sup_cached = safe_parse(s_t_entity, s_rh_entity)
 
             if effective_sup_t is not None and not math.isnan(effective_sup_t):
+                if sup_cached:
+                    self.log("HAL ALERT: Supply sensor loss debounced with cached value.", level="WARNING")
                 self.supply_t = effective_sup_t
                 self.supply_rh = effective_sup_rh
                 self.supply_dp, self.supply_w = self.calc_psychrometrics(self.supply_t, self.supply_rh)
@@ -423,10 +483,8 @@ class HapsicController(hass.Hass):
                     return False
 
             # --- Post-Steam (Duct) with EMA Filter (with safe fallback + 30m cache) ---
-            raw_duct_t_str = self.get_state(self.HAPSIC_DUCT_TEMP_ENTITY)
-            raw_duct_rh_str = self.get_state(self.HAPSIC_DUCT_RH_ENTITY)
-            effective_duct_t = safe_float(raw_duct_t_str)
-            effective_duct_rh = safe_float(raw_duct_rh_str)
+            effective_duct_t, raw_duct_t_str, duct_t_cached = safe_sensor(self.HAPSIC_DUCT_TEMP_ENTITY)
+            effective_duct_rh, raw_duct_rh_str, duct_rh_cached = safe_sensor(self.HAPSIC_DUCT_RH_ENTITY)
 
             if effective_duct_rh is None:
                 self.pending_fault_reason = "Duct RH Sensor Failure"
@@ -436,6 +494,8 @@ class HapsicController(hass.Hass):
                     level="ERROR",
                 )
                 return False
+            if duct_rh_cached:
+                self.log("HAL ALERT: Duct RH sensor loss debounced with cached value.", level="WARNING")
 
             if effective_duct_t is None:
                 fallback_candidates = [
@@ -458,6 +518,8 @@ class HapsicController(hass.Hass):
                 )
             else:
                 self.duct_temp_fallback_active = False
+                if duct_t_cached:
+                    self.log("HAL ALERT: Duct temp sensor loss debounced with cached value.", level="WARNING")
 
             if effective_duct_t is not None and not math.isnan(effective_duct_t):
                 self.raw_duct_rh = effective_duct_rh
@@ -501,14 +563,16 @@ class HapsicController(hass.Hass):
                     return False
 
             # --- Flow (with safe fallback + 30m cache) ---
-            raw_supply_flow = self.get_state("sensor.hapsic_supply_flow")
-            raw_exhaust_flow = self.get_state("sensor.hapsic_extract_flow")
-            raw_bypass = self.get_state("sensor.zehnder_comfoair_q_a4cb9c_bypass_state")
-            eff_sf, _ = safe_parse(raw_supply_flow, "0")  # dummy second arg
-            eff_ef, _ = safe_parse(raw_exhaust_flow, "0")
-            eff_bp, _ = safe_parse(raw_bypass, "0")
+            supply_flow_entity = "sensor.hapsic_supply_flow"
+            exhaust_flow_entity = "sensor.hapsic_extract_flow"
+            bypass_entity = "sensor.zehnder_comfoair_q_a4cb9c_bypass_state"
+            eff_sf, raw_supply_flow, sf_cached = safe_sensor(supply_flow_entity)
+            eff_ef, raw_exhaust_flow, ef_cached = safe_sensor(exhaust_flow_entity)
+            eff_bp, raw_bypass, bp_cached = safe_sensor(bypass_entity)
 
             if eff_sf is not None and eff_ef is not None and eff_bp is not None:
+                if sf_cached or ef_cached or bp_cached:
+                    self.log("HAL ALERT: Flow sensor loss debounced with cached value.", level="WARNING")
                 self.supply_flow = eff_sf
                 self.exhaust_flow = eff_ef
                 self.bypass_state = eff_bp

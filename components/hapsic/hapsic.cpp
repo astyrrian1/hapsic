@@ -320,6 +320,28 @@ float HapsicController::sensor_value(sensor::Sensor *s) {
   return s->state;
 }
 
+float HapsicController::cached_sensor_value(sensor::Sensor *s, SensorLossCache &cache) {
+  uint32_t now_ms = esp_timer_get_time() / 1000;
+  float raw_value = sensor_value(s);
+
+  if (!std::isnan(raw_value)) {
+    cache.value = raw_value;
+    cache.last_valid_ms = now_ms;
+    cache.missing_since_ms = 0;
+    cache.has_value = true;
+    return raw_value;
+  }
+
+  if (cache.missing_since_ms == 0)
+    cache.missing_since_ms = now_ms;
+
+  uint32_t last_valid_age_ms = cache.last_valid_ms > 0 ? now_ms - cache.last_valid_ms : SENSOR_LOSS_GRACE_MS;
+  if (cache.has_value && last_valid_age_ms < SENSOR_LOSS_GRACE_MS)
+    return cache.value;
+
+  return NAN;
+}
+
 const char *HapsicController::state_name(State s) {
   switch (s) {
     case INITIALIZING:
@@ -351,7 +373,7 @@ bool HapsicController::read_sensors() {
   pending_sensor_fault_reason_ = "Sensor Failure";
 
   // --- Supply flow & bypass (CAN) ---
-  float raw_flow = sensor_value(supply_flow_sensor_);
+  float raw_flow = cached_sensor_value(supply_flow_sensor_, supply_flow_cache_);
   if (std::isnan(raw_flow)) {
     ESP_LOGW("hapsic", "CRITICAL: Supply flow sensor NaN");
     return false;
@@ -360,13 +382,13 @@ bool HapsicController::read_sensors() {
   ema_flow_initialized_ = true;
   supply_flow_ = ema_supply_flow_;
 
-  float raw_extract = sensor_value(extract_flow_sensor_);
+  float raw_extract = cached_sensor_value(extract_flow_sensor_, extract_flow_cache_);
   if (!std::isnan(raw_extract))
     extract_flow_ = raw_extract;
 
   // --- Bypass state ---
-  float raw_bypass = sensor_value(bypass_sensor_);
-  float raw_ha_bypass = sensor_value(bypass_ha_sensor_);
+  float raw_bypass = cached_sensor_value(bypass_sensor_, bypass_cache_);
+  float raw_ha_bypass = cached_sensor_value(bypass_ha_sensor_, bypass_ha_cache_);
   if (std::isnan(raw_bypass) && !std::isnan(raw_ha_bypass)) {
     raw_bypass = raw_ha_bypass;
   }
@@ -377,12 +399,12 @@ bool HapsicController::read_sensors() {
 
   // --- Inside Conditions (Primary: House HA, Fallback 1: Extract CAN, Fallback
   // 2: Extract HA, Fallback 3: Cache) ---
-  float house_t = sensor_value(house_temp_sensor_);
-  float house_rh = sensor_value(house_rh_sensor_);
-  float ext_can_t = sensor_value(extract_can_temp_sensor_);
-  float ext_can_rh = sensor_value(extract_can_rh_sensor_);
-  float ext_ha_t = sensor_value(extract_ha_temp_sensor_);
-  float ext_ha_rh = sensor_value(extract_ha_rh_sensor_);
+  float house_t = cached_sensor_value(house_temp_sensor_, house_temp_cache_);
+  float house_rh = cached_sensor_value(house_rh_sensor_, house_rh_cache_);
+  float ext_can_t = cached_sensor_value(extract_can_temp_sensor_, extract_can_temp_cache_);
+  float ext_can_rh = cached_sensor_value(extract_can_rh_sensor_, extract_can_rh_cache_);
+  float ext_ha_t = cached_sensor_value(extract_ha_temp_sensor_, extract_ha_temp_cache_);
+  float ext_ha_rh = cached_sensor_value(extract_ha_rh_sensor_, extract_ha_rh_cache_);
 
   float effective_room_temp = NAN;
   float effective_room_rh = NAN;
@@ -426,10 +448,10 @@ bool HapsicController::read_sensors() {
 
   // --- Supply Conditions (Primary: Supply CAN, Fallback: Supply HA, Fallback
   // 3: Cache) ---
-  float sup_can_t = sensor_value(supply_can_temp_sensor_);
-  float sup_can_rh = sensor_value(supply_can_rh_sensor_);
-  float sup_ha_t = sensor_value(supply_ha_temp_sensor_);
-  float sup_ha_rh = sensor_value(supply_ha_rh_sensor_);
+  float sup_can_t = cached_sensor_value(supply_can_temp_sensor_, supply_can_temp_cache_);
+  float sup_can_rh = cached_sensor_value(supply_can_rh_sensor_, supply_can_rh_cache_);
+  float sup_ha_t = cached_sensor_value(supply_ha_temp_sensor_, supply_ha_temp_cache_);
+  float sup_ha_rh = cached_sensor_value(supply_ha_rh_sensor_, supply_ha_rh_cache_);
 
   float effective_supply_temp = NAN;
   float effective_supply_rh = NAN;
@@ -467,8 +489,8 @@ bool HapsicController::read_sensors() {
   }
 
   // --- Duct RH is critical; duct temperature can degrade to a warm fallback. ---
-  float raw_duct_temp = sensor_value(duct_temp_sensor_);
-  float raw_duct_rh = sensor_value(duct_rh_sensor_);
+  float raw_duct_temp = cached_sensor_value(duct_temp_sensor_, duct_temp_cache_);
+  float raw_duct_rh = cached_sensor_value(duct_rh_sensor_, duct_rh_cache_);
 
   if (std::isnan(raw_duct_rh)) {
     pending_sensor_fault_reason_ = "Duct RH Sensor Failure";
@@ -507,8 +529,8 @@ bool HapsicController::read_sensors() {
   }
 
   // --- Outdoor conditions (CAN — reports in °C after filter) ---
-  float od_temp_c = sensor_value(outdoor_temp_sensor_);
-  float od_rh = sensor_value(outdoor_rh_sensor_);
+  float od_temp_c = cached_sensor_value(outdoor_temp_sensor_, outdoor_temp_cache_);
+  float od_rh = cached_sensor_value(outdoor_rh_sensor_, outdoor_rh_cache_);
 
   if (std::isnan(od_temp_c) || std::isnan(od_rh)) {
     od_temp_c = 10.0f;  // 50F in C
@@ -523,7 +545,7 @@ bool HapsicController::read_sensors() {
   }
 
   // --- Target setpoint (from HA, absolute DEW POINT format) ---
-  float target_dp = sensor_value(target_dew_point_sensor);
+  float target_dp = cached_sensor_value(target_dew_point_sensor, target_dew_point_cache_);
   if (!std::isnan(target_dp) && target_dp > -40.0f && target_dp <= 40.0f) {
     cached_target_dp_ = target_dp;
   }
@@ -531,7 +553,7 @@ bool HapsicController::read_sensors() {
   target_room_dp_ = cached_target_dp_;
 
   // --- Max capacity (from HA sensor) ---
-  float mc = sensor_value(max_capacity_sensor_);
+  float mc = cached_sensor_value(max_capacity_sensor_, max_capacity_cache_);
   if (!std::isnan(mc) && mc > 0.1f) {
     max_capacity_ = mc;
   }
