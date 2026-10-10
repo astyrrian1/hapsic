@@ -414,19 +414,30 @@ class HapsicController(hass.Hass):
 
     def calc_psychrometrics(self, temp_f, rh):
         if temp_f is None or rh is None: return None, None
+        if (not all(math.isfinite(value) for value in (temp_f, rh, self.P_ATM))
+                or not 0 <= rh <= 100 or self.P_ATM <= 0):
+            return None, None
 
         temp_c = (temp_f - 32) * (5/9)
+        if temp_c <= -243.04:
+            return None, None
         es = 0.61121 * math.exp((17.625 * temp_c) / (temp_c + 243.04))
         ea = es * (rh / 100.0)
+        if not math.isfinite(ea) or ea >= self.P_ATM:
+            return None, None
 
         if ea <= 0.001:
             dp_f = -40.0
         else:
             alpha = math.log(ea / 0.61121)
+            if 17.625 - alpha == 0:
+                return None, None
             dp_c = (243.04 * alpha) / (17.625 - alpha)
             dp_f = (dp_c * 9/5) + 32
 
         w = 0.62198 * (ea / (self.P_ATM - ea)) * 7000.0
+        if not math.isfinite(dp_f) or not math.isfinite(w) or w < 0:
+            return None, None
         return dp_f, w
 
     def calc_dp_from_w(self, w_grains):
@@ -480,9 +491,13 @@ class HapsicController(hass.Hass):
             return None
         return parsed if math.isfinite(parsed) else None
 
-    def cached_sensor_float(self, entity_id, now_time):
+    def cached_sensor_float(self, entity_id, now_time, *, humidity=False):
         raw_value = self.get_state(entity_id)
         parsed = self.parse_sensor_float(raw_value)
+        if humidity and parsed is not None and not 0 <= parsed <= 100:
+            # A fresh impossible RH value is not missing data. Never hide it
+            # behind a previous valid sample or admit it to a smoothing filter.
+            raise ValueError("Relative humidity outside 0..100 percent")
         cache = self.sensor_value_cache.setdefault(
             entity_id,
             {"value": None, "last_valid": 0.0, "missing_since": 0.0},
@@ -509,7 +524,7 @@ class HapsicController(hass.Hass):
         }
         duct_rh_dependencies = {}
         for entity_id in (self.SHELLY_DUCT_RH_ENTITY, self.HAPSIC_DUCT_RH_ENTITY):
-            value, raw_state, from_cache = self.cached_sensor_float(entity_id, now_time)
+            value, raw_state, from_cache = self.cached_sensor_float(entity_id, now_time, humidity=True)
             if value is None:
                 cache = self.sensor_value_cache[entity_id]
                 loss_age = now_time - cache["missing_since"]
@@ -582,12 +597,12 @@ class HapsicController(hass.Hass):
         try:
             now_time = time.time()
 
-            def safe_sensor(entity_id):
-                return self.cached_sensor_float(entity_id, now_time)
+            def safe_sensor(entity_id, *, humidity=False):
+                return self.cached_sensor_float(entity_id, now_time, humidity=humidity)
 
             def safe_parse(t_entity, rh_entity):
                 parsed_t, raw_t, cached_t = safe_sensor(t_entity)
-                parsed_rh, raw_rh, cached_rh = safe_sensor(rh_entity)
+                parsed_rh, raw_rh, cached_rh = safe_sensor(rh_entity, humidity=True)
                 if parsed_t is None or parsed_rh is None:
                     return None, None, raw_t, raw_rh, cached_t or cached_rh
                 return parsed_t, parsed_rh, raw_t, raw_rh, cached_t or cached_rh
@@ -601,6 +616,9 @@ class HapsicController(hass.Hass):
             h_rh = self.get_state(h_rh_entity)
             e_t = self.get_state(e_t_entity)
             e_rh = self.get_state(e_rh_entity)
+            fallback_rh = self.parse_sensor_float(e_rh)
+            if fallback_rh is not None and not 0 <= fallback_rh <= 100:
+                return False
             self.log(
                 f"HAL DEBUG: room_avg_t={h_t!r}, room_avg_rh={h_rh!r}, "
                 f"extract_t={e_t!r}, extract_rh={e_rh!r}",
@@ -615,7 +633,10 @@ class HapsicController(hass.Hass):
             if effective_room_t is not None and not math.isnan(effective_room_t):
                 if room_cached:
                     self.log("HAL ALERT: Inside sensor loss debounced with cached value.", level="WARNING")
-                self.room_dp, self.room_w = self.calc_psychrometrics(effective_room_t, effective_room_rh)
+                dp, mixing_ratio = self.calc_psychrometrics(effective_room_t, effective_room_rh)
+                if dp is None:
+                    return False
+                self.room_dp, self.room_w = dp, mixing_ratio
                 self.room_temp_avg = effective_room_t
                 self.room_rh_avg = effective_room_rh
                 self.last_valid_room_dp_time = now_time
@@ -659,7 +680,10 @@ class HapsicController(hass.Hass):
             if effective_out_t is not None and not math.isnan(effective_out_t):
                 if out_cached:
                     self.log("HAL ALERT: Outdoor sensor loss debounced with cached value.", level="WARNING")
-                self.outdoor_dp, self.outdoor_w = self.calc_psychrometrics(effective_out_t, effective_out_rh)
+                dp, mixing_ratio = self.calc_psychrometrics(effective_out_t, effective_out_rh)
+                if dp is None:
+                    return False
+                self.outdoor_dp, self.outdoor_w = dp, mixing_ratio
                 self.last_valid_outdoor_time = now_time
             else:
                 cache_age = now_time - self.last_valid_outdoor_time
@@ -690,7 +714,10 @@ class HapsicController(hass.Hass):
                     self.log("HAL ALERT: Supply sensor loss debounced with cached value.", level="WARNING")
                 self.supply_t = effective_sup_t
                 self.supply_rh = effective_sup_rh
-                self.supply_dp, self.supply_w = self.calc_psychrometrics(self.supply_t, self.supply_rh)
+                dp, mixing_ratio = self.calc_psychrometrics(self.supply_t, self.supply_rh)
+                if dp is None:
+                    return False
+                self.supply_dp, self.supply_w = dp, mixing_ratio
                 self.last_valid_supply_w_time = now_time
             else:
                 cache_age = now_time - self.last_valid_supply_w_time
@@ -711,7 +738,7 @@ class HapsicController(hass.Hass):
 
             # --- Post-Steam (Duct) with EMA Filter (with safe fallback + 30m cache) ---
             effective_duct_t, raw_duct_t_str, duct_t_cached = safe_sensor(self.HAPSIC_DUCT_TEMP_ENTITY)
-            effective_duct_rh, raw_duct_rh_str, duct_rh_cached = safe_sensor(self.HAPSIC_DUCT_RH_ENTITY)
+            effective_duct_rh, raw_duct_rh_str, duct_rh_cached = safe_sensor(self.HAPSIC_DUCT_RH_ENTITY, humidity=True)
 
             if effective_duct_rh is None:
                 self.pending_fault_reason = "Duct RH Sensor Failure"
@@ -749,6 +776,8 @@ class HapsicController(hass.Hass):
                     self.log("HAL ALERT: Duct temp sensor loss debounced with cached value.", level="WARNING")
 
             if effective_duct_t is not None and not math.isnan(effective_duct_t):
+                if self.calc_psychrometrics(effective_duct_t, effective_duct_rh)[0] is None:
+                    return False
                 self.raw_duct_rh = effective_duct_rh
 
                 duct_alpha = 0.2
@@ -769,7 +798,10 @@ class HapsicController(hass.Hass):
                     self.duct_t = self.duct_ema_t
 
                 self.duct_rh = self.duct_ema_rh
-                self.duct_dp, self.duct_w = self.calc_psychrometrics(self.duct_t, self.duct_rh)
+                dp, mixing_ratio = self.calc_psychrometrics(self.duct_t, self.duct_rh)
+                if dp is None:
+                    return False
+                self.duct_dp, self.duct_w = dp, mixing_ratio
                 self.last_valid_duct_time = now_time
             else:
                 cache_age = now_time - self.last_valid_duct_time

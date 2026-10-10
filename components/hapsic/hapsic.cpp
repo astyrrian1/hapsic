@@ -49,15 +49,14 @@ inline uint64_t esp_timer_get_time() {
 PsychResult MagnusTetens::calculate(float temp_c, float rh_percent, float pressure_kpa) {
   PsychResult result = {-40.0f, 0.0f, false};
 
-  if (std::isnan(temp_c) || std::isnan(rh_percent))
+  if (!std::isfinite(temp_c) || !std::isfinite(rh_percent) || !std::isfinite(pressure_kpa) || temp_c <= -B ||
+      rh_percent < 0.0f || rh_percent > 100.0f || pressure_kpa <= 0.0f)
     return result;
-  if (rh_percent < 0.0f)
-    rh_percent = 0.0f;
-  if (rh_percent > 100.0f)
-    rh_percent = 100.0f;
 
   float es = 0.61121f * expf((A * temp_c) / (temp_c + B));
   float ea = es * (rh_percent / 100.0f);
+  if (!std::isfinite(ea) || ea >= pressure_kpa)
+    return result;
 
   if (ea <= 0.001f) {
     result.dew_point_c = -40.0f;
@@ -68,13 +67,11 @@ PsychResult MagnusTetens::calculate(float temp_c, float rh_percent, float pressu
 
   float alpha = logf(ea / 0.61121f);
   float dp_c = (B * alpha) / (A - alpha);
+  float mixing_ratio = 0.62198f * (ea / (pressure_kpa - ea)) * 1000.0f;
+  if (!std::isfinite(dp_c) || !std::isfinite(mixing_ratio) || mixing_ratio < 0.0f)
+    return result;
   result.dew_point_c = dp_c;
-
-  if (pressure_kpa - ea > 0.01f) {
-    result.mixing_ratio_g_kg = 0.62198f * (ea / (pressure_kpa - ea)) * 1000.0f;
-  } else {
-    result.mixing_ratio_g_kg = 0.0f;
-  }
+  result.mixing_ratio_g_kg = mixing_ratio;
 
   result.is_valid = true;
   return result;
@@ -369,6 +366,17 @@ const char *HapsicController::state_name(State s) {
 bool HapsicController::read_sensors() {
   pending_sensor_fault_reason_ = "Sensor Failure";
 
+  // Fresh impossible RH is an input fault, not a missing report eligible for
+  // cache/EMA substitution. Check before updating any valid-sample timestamps.
+  for (auto *s : {house_rh_sensor_, extract_can_rh_sensor_, extract_ha_rh_sensor_, supply_can_rh_sensor_,
+                  supply_ha_rh_sensor_, duct_rh_sensor_, outdoor_rh_sensor_}) {
+    float rh = sensor_value(s);
+    if (std::isfinite(rh) && (rh < 0.0f || rh > 100.0f)) {
+      pending_sensor_fault_reason_ = "Relative humidity outside 0..100 percent";
+      return false;
+    }
+  }
+
   // --- Supply flow & bypass (CAN) ---
   float raw_flow = cached_sensor_value(supply_flow_sensor_, supply_flow_cache_);
   if (std::isnan(raw_flow) || raw_flow < 20.0f) {
@@ -434,6 +442,8 @@ bool HapsicController::read_sensors() {
 
   if (!std::isnan(effective_room_temp) && !std::isnan(effective_room_rh)) {
     auto room_psych = MagnusTetens::calculate(effective_room_temp, effective_room_rh, P_ATM);
+    if (!room_psych.is_valid)
+      return false;
     if (room_psych.is_valid) {
       room_dp_ = room_psych.dew_point_c;
       room_w_ = room_psych.mixing_ratio_g_kg;
@@ -473,6 +483,8 @@ bool HapsicController::read_sensors() {
 
   if (!std::isnan(effective_supply_temp) && !std::isnan(effective_supply_rh)) {
     auto sup_psych = MagnusTetens::calculate(effective_supply_temp, effective_supply_rh, P_ATM);
+    if (!sup_psych.is_valid)
+      return false;
     if (sup_psych.is_valid) {
       supply_dp_ = sup_psych.dew_point_c;
       supply_w_ = sup_psych.mixing_ratio_g_kg;
@@ -503,6 +515,8 @@ bool HapsicController::read_sensors() {
     ESP_LOGE("hapsic", "CRITICAL: Duct RH sensor NaN — temp=%.1f rh=%.1f", raw_duct_temp, raw_duct_rh);
     return false;
   }
+  if (std::isfinite(raw_duct_temp) && !MagnusTetens::calculate(raw_duct_temp, raw_duct_rh, P_ATM).is_valid)
+    return false;
 
   raw_duct_rh_ = raw_duct_rh;
   ema_duct_rh_ = ema(raw_duct_rh, ema_duct_rh_, ema_duct_initialized_);
@@ -529,6 +543,8 @@ bool HapsicController::read_sensors() {
   ema_duct_initialized_ = true;
 
   auto duct_psych = MagnusTetens::calculate(duct_temp_, duct_rh_, P_ATM);
+  if (!duct_psych.is_valid)
+    return false;
   if (duct_psych.is_valid) {
     duct_dp_ = duct_psych.dew_point_c;
     duct_w_ = duct_psych.mixing_ratio_g_kg;
@@ -545,6 +561,8 @@ bool HapsicController::read_sensors() {
   }
 
   auto od_psych = MagnusTetens::calculate(od_temp_c, od_rh, P_ATM);
+  if (!od_psych.is_valid)
+    return false;
   if (od_psych.is_valid) {
     outdoor_dp_ = od_psych.dew_point_c;
     outdoor_w_ = od_psych.mixing_ratio_g_kg;

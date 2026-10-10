@@ -49,19 +49,27 @@
         {
           "id": "6a",
           "name": "Finite sensor and target/nameplate validation; independent flow/bypass hazards",
-          "status": "complete; local commit follows this execution record"
+          "status": "complete"
         },
         {
           "id": "6b",
-          "name": "Remaining configurable-gain and psychrometric input-domain validation",
-          "status": "audit and failing reproductions in preparation"
+          "name": "RH and psychrometric domain validation in both controllers",
+          "status": "complete; local commit follows this execution record"
+        },
+        {
+          "id": "6c",
+          "name": "Native configurable gain validation",
+          "status": "RED tests in preparation"
         }
       ]
     },
     {
       "id": 7,
       "name": "Original source freshness",
-      "status": "pending"
+      "status": "pending",
+      "remaining_findings": [
+        "Raw Shelly duct RH must independently stop output when the cleansed HA template still reports a lower value. Preserve raw report identity and age in that integration."
+      ]
     },
     {
       "id": 8,
@@ -114,7 +122,8 @@
     "2": "8b8605a",
     "3": "949fc46",
     "4": "7cc7084",
-    "5a": "93c4ad1"
+    "5a": "93c4ad1",
+    "6a": "00850c8"
   },
   "evidence": {
     "1": "15 initial failing meta-tests plus 3 review failures; 92 pytest tests and full presubmit passed; review resolved import order and silent FSM failures.",
@@ -122,7 +131,8 @@
     "3": "Missing Python/native adapter RED, clock leakage and interleaved-rig RED; full presubmit passed including sanitizer builds; isolated module globals resolved review finding.",
     "4": "11 Python and 2 native RED failures; shutdown fixes; all reviewer-requested retry/partial-init/active-native cases pass. Full presubmit with 127 pytest tests, production/desk/native builds passed. No blocking review issues.",
     "5": "Platform increment 5a: 21 tracker tests and integrated reconciliation/shutdown coverage total 48 passing focused tests. RED demonstrated fixed deadlines, missing provenance, report-read exceptions, concurrent reinitialization, and explicit ON with zero/missing/boolean brightness. Tracker and adapter reviews each completed three bounded cycles with substantive findings resolved. Final full presubmit passed (164 pytest tests, sanitizer coverage, and clean production/desk compilation); log /tmp/hapsic-final-guard-presubmit.log. Concrete qualified device transport and durable recovery remain incomplete; chunk 5 remains in progress.",
-    "6a": "24 initial failing actual-source Python/C++ tests; follow-up RED for bool capacity, boolean parsing, and finite deeply negative target parity (4 more failures). All 78 input regressions pass; two adversarial cycles resolved target boundary mismatch. Existing adapter smoke fixture now supplies required flow/bypass. Complete presubmit passed with 242 pytest tests, sanitizer coverage, standalone suites and clean production/desk builds; log /tmp/hapsic-input-presubmit.log. No source freshness or durable recovery qualification claimed."
+    "6a": "24 initial failing actual-source Python/C++ tests; follow-up RED for bool capacity, boolean parsing, and finite deeply negative target parity (4 more failures). All 78 input regressions pass; two adversarial cycles resolved target boundary mismatch. Existing adapter smoke fixture now supplies required flow/bypass. Complete presubmit passed with 242 pytest tests, sanitizer coverage, standalone suites and clean production/desk builds; log /tmp/hapsic-input-presubmit.log. No source freshness or durable recovery qualification claimed.",
+    "6b": "38 initial actual-source RED cases; four derived-observation failures; adversarial review added two REDs for unused fallback RH and inverse-Magnus denominator roundoff. Two bounded review cycles resolved all substantive findings. 150 focused input tests pass; complete presubmit passed with 314 pytest tests, sanitizer coverage, standalone suites and clean production/desk builds; log /tmp/hapsic-domain-presubmit.log. Source provenance and recovery qualification remain separate."
   },
   "locked_contract": {
     "critical_input_expiry_seconds": 60,

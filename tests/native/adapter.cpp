@@ -52,10 +52,10 @@ int main() {
         return 2;
       sensors.at(name).publish_state(std::stof(value));
     } else if (command == "magnus") {
-      float temperature, rh, pressure;
+      std::string temperature, rh, pressure;
       if (!(input >> temperature >> rh >> pressure))
         return 2;
-      auto result = MagnusTetens::calculate(temperature, rh, pressure);
+      auto result = MagnusTetens::calculate(std::stof(temperature), std::stof(rh), std::stof(pressure));
       std::cout << "{\"valid\":" << result.is_valid << ",\"dew_point_c\":" << result.dew_point_c
                 << ",\"mixing_ratio_g_kg\":" << result.mixing_ratio_g_kg << "}\n";
     } else if (command == "snapshot") {
