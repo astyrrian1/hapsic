@@ -13,8 +13,19 @@ This conftest uses importlib to load the .py file directly, so:
 
 import importlib.util
 import sys
+import time
 import types
 from pathlib import Path
+
+import pytest
+
+_REAL_TIME = time.time
+
+
+@pytest.fixture(autouse=True)
+def isolate_legacy_clock(monkeypatch):
+    """Legacy standalone helpers assign time.time directly; restore it per test."""
+    monkeypatch.setattr(time, "time", _REAL_TIME)
 
 # ---------------------------------------------------------------------------
 # 1. Stub appdaemon before anything tries to import it
@@ -70,7 +81,13 @@ _hassapi.Hass = _MockHass
 # 2. Load hapsic_controller.py by file path (no __init__.py required)
 # ---------------------------------------------------------------------------
 _controller_path = Path(__file__).parent / "apps" / "hapsic-controller" / "hapsic_controller.py"
-_spec = importlib.util.spec_from_file_location("hapsic_controller", _controller_path)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["hapsic_controller"] = _mod
-_spec.loader.exec_module(_mod)
+def load_controller(name="hapsic_controller", register=sys.modules.__setitem__):
+    """Load the sole controller source with isolated globals when requested."""
+    spec = importlib.util.spec_from_file_location(name, _controller_path)
+    module = importlib.util.module_from_spec(spec)
+    register(name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+load_controller()

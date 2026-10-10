@@ -99,3 +99,18 @@ def test_consolidated_suites_run_standalone(suite):
     result = subprocess.run([sys.executable, str(ROOT / f"test_{suite}.py")], cwd=ROOT,
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_legacy_clock_mutation_is_restored_between_tests(tmp_path):
+    suite = tmp_path / "test_clock_isolation.py"
+    suite.write_text(
+        "import time\n"
+        "def test_mutate():\n    time.time = lambda: 1.0\n"
+        "def test_next():\n    assert time.time() > 1.0\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys, pytest, conftest; "
+         "sys.exit(pytest.main([sys.argv[1], '-q'], plugins=[conftest]))", str(suite)],
+        cwd=ROOT, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
