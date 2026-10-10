@@ -101,6 +101,7 @@ def test_wrong_snapshot_expectation_really_fails(native_runner):
 def test_streamed_reports_reach_real_sensor_processing(native_runner):
     value = native_runner(
         "setup\nsensor supply_flow 200\nsensor house_temp 20\nsensor house_rh 50\n"
+        "sensor extract_flow 200\nsensor bypass 0\n"
         "sensor supply_temp 20\nsensor supply_rh 50\n"
         "sensor duct_temp 20\nsensor duct_rh 50\ntick 5500\nsnapshot\n"
     )[-1]

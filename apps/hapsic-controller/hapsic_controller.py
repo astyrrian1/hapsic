@@ -472,13 +472,13 @@ class HapsicController(hass.Hass):
 
     @staticmethod
     def parse_sensor_float(value):
-        if HapsicController.is_invalid_state(value):
+        if isinstance(value, bool) or HapsicController.is_invalid_state(value):
             return None
         try:
             parsed = float(value)
         except (ValueError, TypeError):
             return None
-        return None if math.isnan(parsed) else parsed
+        return parsed if math.isfinite(parsed) else None
 
     def cached_sensor_float(self, entity_id, now_time):
         raw_value = self.get_state(entity_id)
@@ -637,25 +637,16 @@ class HapsicController(hass.Hass):
                     )
                     return False
 
-            # --- Config Inputs (with safe fallback) ---
+            # Configuration must be independently valid before any division.
             target_entity = "input_number.target_dew_point"
             max_cap_entity = "input_number.humidifier_max_capacity"
-            cfg_target, cfg_max_cap, raw_target_dp, raw_max_cap, cfg_cached = safe_parse(
-                target_entity,
-                max_cap_entity,
-            )
-            if cfg_target is None:
-                self.log(
-                    f"HAL ALERT: Config inputs unavailable "
-                    f"(target={raw_target_dp!r}, cap={raw_max_cap!r}). "
-                    f"Using cached.",
-                    level="WARNING",
-                )
-            else:
-                if cfg_cached:
-                    self.log("HAL ALERT: Config input loss debounced with cached value.", level="WARNING")
-                self.target_room_dp = cfg_target
-                self.MAX_CAPACITY = cfg_max_cap
+            cfg_target = self.parse_sensor_float(self.get_state(target_entity))
+            cfg_max_cap = self.parse_sensor_float(self.get_state(max_cap_entity))
+            if cfg_target is None or cfg_max_cap is None or cfg_max_cap <= 0:
+                self.pending_fault_reason = "Invalid target or nameplate capacity"
+                return False
+            self.target_room_dp = cfg_target
+            self.MAX_CAPACITY = cfg_max_cap
 
             # --- Outdoor Data (with safe fallback + 30m cache) ---
             out_t_entity = "sensor.zehnder_comfoair_q_a4cb9c_outdoor_air_temperature"
@@ -798,38 +789,25 @@ class HapsicController(hass.Hass):
                     )
                     return False
 
-            # --- Flow (with safe fallback + 30m cache) ---
-            supply_flow_entity = "sensor.hapsic_supply_flow"
-            exhaust_flow_entity = "sensor.hapsic_extract_flow"
-            bypass_entity = "sensor.zehnder_comfoair_q_a4cb9c_bypass_state"
-            eff_sf, raw_supply_flow, sf_cached = safe_sensor(supply_flow_entity)
-            eff_ef, raw_exhaust_flow, ef_cached = safe_sensor(exhaust_flow_entity)
-            eff_bp, raw_bypass, bp_cached = safe_sensor(bypass_entity)
-
-            if eff_sf is not None and eff_ef is not None and eff_bp is not None:
-                if sf_cached or ef_cached or bp_cached:
-                    self.log("HAL ALERT: Flow sensor loss debounced with cached value.", level="WARNING")
+            # Each critical value stands alone; no group or 30-minute fallback.
+            eff_sf, _, _ = safe_sensor("sensor.hapsic_supply_flow")
+            eff_ef, _, _ = safe_sensor("sensor.hapsic_extract_flow")
+            eff_bp, _, _ = safe_sensor("sensor.zehnder_comfoair_q_a4cb9c_bypass_state")
+            if eff_sf is not None:
                 self.supply_flow = eff_sf
+            if eff_ef is not None:
                 self.exhaust_flow = eff_ef
+            if eff_bp is not None:
                 self.bypass_state = eff_bp
-                self.last_valid_flow_time = now_time
-            else:
-                cache_age = now_time - self.last_valid_flow_time
-                if self.last_valid_flow_time > 0 and cache_age < 1800:
-                    self.log(
-                        f"HAL ALERT: Flow sensors offline "
-                        f"(sf={raw_supply_flow!r}, ef={raw_exhaust_flow!r}, "
-                        f"bp={raw_bypass!r}). Using cached.",
-                        level="WARNING",
-                    )
-                else:
-                    self.log(
-                        f"HAL CRITICAL: Flow sensors failed "
-                        f"(sf={raw_supply_flow!r}, ef={raw_exhaust_flow!r}, "
-                        f"bp={raw_bypass!r}) and cache expired.",
-                        level="ERROR",
-                    )
-                    return False
+            if eff_sf is not None and eff_sf < 20:
+                self.pending_fault_reason = "Zero Flow"
+                return False
+            if eff_bp is not None and (eff_bp < 0 or eff_bp > 5):
+                self.pending_fault_reason = "Unsafe Economizer Bypass"
+                return False
+            if eff_sf is None or eff_ef is None or eff_bp is None or eff_ef < 0:
+                self.pending_fault_reason = "Flow or bypass sensor unavailable"
+                return False
 
             # --- 2.4 Mass Balance & Feasibility Horizon Engine ---
             cfm_nat = 1380.0 / 17.0

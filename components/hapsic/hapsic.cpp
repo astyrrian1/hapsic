@@ -259,6 +259,7 @@ void HapsicController::update() {
 
   bool sensors_ok = read_sensors();
   if (!sensors_ok) {
+    steam_voltage_ = 0.0f;
     if (fsm_state_ != INITIALIZING) {
       trigger_fault(pending_sensor_fault_reason_);
     }
@@ -320,7 +321,7 @@ float HapsicController::cached_sensor_value(sensor::Sensor *s, SensorLossCache &
   uint32_t now_ms = esp_timer_get_time() / 1000;
   float raw_value = sensor_value(s);
 
-  if (!std::isnan(raw_value)) {
+  if (std::isfinite(raw_value)) {
     cache.value = raw_value;
     cache.last_valid_ms = now_ms;
     cache.missing_since_ms = 0;
@@ -370,7 +371,8 @@ bool HapsicController::read_sensors() {
 
   // --- Supply flow & bypass (CAN) ---
   float raw_flow = cached_sensor_value(supply_flow_sensor_, supply_flow_cache_);
-  if (std::isnan(raw_flow)) {
+  if (std::isnan(raw_flow) || raw_flow < 20.0f) {
+    pending_sensor_fault_reason_ = "Supply flow unavailable or unsafe";
     ESP_LOGW("hapsic", "CRITICAL: Supply flow sensor NaN");
     return false;
   }
@@ -391,6 +393,14 @@ bool HapsicController::read_sensors() {
 
   if (!std::isnan(raw_bypass)) {
     bypass_pct_ = raw_bypass;
+  }
+  if (!std::isnan(raw_bypass) && (raw_bypass < 0.0f || raw_bypass > 5.0f)) {
+    pending_sensor_fault_reason_ = "Unsafe Economizer Bypass";
+    return false;
+  }
+  if (std::isnan(raw_extract) || raw_extract < 0.0f || std::isnan(raw_bypass)) {
+    pending_sensor_fault_reason_ = "Extract flow or bypass unavailable";
+    return false;
   }
 
   // --- Inside Conditions (Primary: House HA, Fallback 1: Extract CAN, Fallback
@@ -541,18 +551,21 @@ bool HapsicController::read_sensors() {
   }
 
   // --- Target setpoint (from HA, absolute DEW POINT format) ---
-  float target_dp = cached_sensor_value(target_dew_point_sensor, target_dew_point_cache_);
-  if (!std::isnan(target_dp) && target_dp > -40.0f && target_dp <= 40.0f) {
-    cached_target_dp_ = target_dp;
+  float target_dp = sensor_value(target_dew_point_sensor);
+  if (!std::isfinite(target_dp)) {
+    pending_sensor_fault_reason_ = "Invalid target dew point";
+    return false;
   }
-
+  cached_target_dp_ = target_dp;
   target_room_dp_ = cached_target_dp_;
 
   // --- Max capacity (from HA sensor) ---
-  float mc = cached_sensor_value(max_capacity_sensor_, max_capacity_cache_);
-  if (!std::isnan(mc) && mc > 0.1f) {
-    max_capacity_ = mc;
+  float mc = sensor_value(max_capacity_sensor_);
+  if (!std::isfinite(mc) || mc <= 0.0f) {
+    pending_sensor_fault_reason_ = "Invalid nameplate capacity";
+    return false;
   }
+  max_capacity_ = mc;
 
   // --- Mass Balance & Feasibility Horizon ---
   total_loss_cfm_ = 1380.0f / 17.0f;  // CFM_nat -> approximately 81.18 CFM
