@@ -39,6 +39,7 @@ def assert_condition(cond, label, detail=""):
         if detail:
             msg += f": {detail}"
         results.append(msg)
+        raise AssertionError(results[-1])
 
 
 def parse_heartbeat_lines(output):

@@ -22,55 +22,11 @@ Run:
 
 import sys
 import time
-import types
 
+import conftest  # noqa: F401 — shared standalone and pytest adapter
 
-# -------------------------------------------------------------------------
-# Mock AppDaemon
-# -------------------------------------------------------------------------
-class MockHass:
-    def __init__(self):
-        self.states = {}
-    def get_state(self, entity_id):
-        return self.states.get(entity_id, None)
-    def call_service(self, service, **kwargs):
-        pass
-    def log(self, msg, level="INFO"):
-        pass
-    def turn_on(self, entity_id, **kwargs):
-        pass
-    def turn_off(self, entity_id, **kwargs):
-        pass
-    def run_every(self, callback, start, interval):
-        pass
-    def listen_state(self, cb, entity_id):
-        pass
-
-class MockHassapi:
-    Hass = MockHass
-
-appdaemon = types.ModuleType('appdaemon')
-sys.modules['appdaemon'] = appdaemon
-plugins = types.ModuleType('plugins')
-appdaemon.plugins = plugins
-sys.modules['appdaemon.plugins'] = plugins
-hass_mod = types.ModuleType('hass')
-plugins.hass = hass_mod
-sys.modules['appdaemon.plugins.hass'] = hass_mod
-hassapi = types.ModuleType('hassapi')
-hass_mod.hassapi = hassapi
-sys.modules['appdaemon.plugins.hass.hassapi'] = hassapi
-hassapi.Hass = MockHass
-
-try:
-    import hapsic_controller as hapsic  # via conftest.py (pytest)
-except ImportError:
-    import importlib.util
-    import pathlib
-    _p = pathlib.Path(__file__).parent / "apps" / "hapsic-controller" / "hapsic_controller.py"
-    _s = importlib.util.spec_from_file_location("hapsic_controller", _p)
-    hapsic = importlib.util.module_from_spec(_s)
-    _s.loader.exec_module(hapsic)
+# isort: split
+import hapsic_controller as hapsic
 
 # -------------------------------------------------------------------------
 # Test Framework
@@ -87,6 +43,7 @@ def assert_state(controller, expected, label):
     else:
         fail_count += 1
         results.append(f"  ❌ {label}: expected {expected}, got {actual}")
+        raise AssertionError(results[-1])
 
 def assert_not_state(controller, excluded, label):
     global pass_count, fail_count
@@ -96,6 +53,7 @@ def assert_not_state(controller, excluded, label):
     else:
         fail_count += 1
         results.append(f"  ❌ {label}: should NOT be {excluded}, but is")
+        raise AssertionError(results[-1])
 
 def assert_true(condition, label):
     global pass_count, fail_count
@@ -104,6 +62,7 @@ def assert_true(condition, label):
     else:
         fail_count += 1
         results.append(f"  ❌ {label}")
+        raise AssertionError(results[-1])
 
 
 def make_controller(state_overrides=None):
@@ -258,6 +217,7 @@ def test_no_airflow_fault():
     else:
         fail_count += 1
         results.append(f"  ❌ no_airflow_fault: expected FAULT or shutdown, got {state} with V={c.steam_voltage}")
+        raise AssertionError(results[-1])
 
 
 def test_cold_start_stasis():
@@ -275,6 +235,7 @@ def test_cold_start_stasis():
     else:
         fail_count += 1
         results.append("  ❌ cold_start_stasis: no stasis detected")
+        raise AssertionError(results[-1])
 
 
 def test_voltage_zero_in_standby():
@@ -295,6 +256,7 @@ def test_voltage_zero_in_standby():
         else:
             fail_count += 1
             results.append(f"  ❌ standby_zero_volts: V={c.steam_voltage}")
+            raise AssertionError(results[-1])
     else:
         pass_count += 1  # Didn't reach standby, skip
 

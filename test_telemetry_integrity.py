@@ -1,69 +1,10 @@
 import json
-import sys
-import types
 from unittest.mock import MagicMock
 
-# -------------------------------------------------------------------------
-# Mock AppDaemon before importing controller
-# -------------------------------------------------------------------------
-_appdaemon = types.ModuleType("appdaemon")
-sys.modules["appdaemon"] = _appdaemon
+import conftest  # noqa: F401 — shared standalone and pytest adapter
 
-_plugins = types.ModuleType("appdaemon.plugins")
-_appdaemon.plugins = _plugins
-sys.modules["appdaemon.plugins"] = _plugins
-
-_hass = types.ModuleType("appdaemon.plugins.hass")
-_plugins.hass = _hass
-sys.modules["appdaemon.plugins.hass"] = _hass
-
-_hassapi = types.ModuleType("appdaemon.plugins.hass.hassapi")
-_hass.hassapi = _hassapi
-sys.modules["appdaemon.plugins.hass.hassapi"] = _hassapi
-
-
-class MockHass:
-    def __init__(self):
-        self.args = {}
-
-    def initialize(self):
-        pass
-
-    def get_state(self, entity_id, attribute=None):
-        return 0.0
-
-    def call_service(self, service, **kwargs):
-        pass
-
-    def turn_on(self, entity_id, **kwargs):
-        pass
-
-    def turn_off(self, entity_id, **kwargs):
-        pass
-
-    def log(self, msg, level="INFO"):
-        pass
-
-    def listen_state(self, cb, entity_id):
-        pass
-
-    def run_every(self, cb, start, interval):
-        pass
-
-
-_hassapi.Hass = MockHass
-
-# Import the controller using the shared harness logic
-import importlib.util
-
-
-def load_controller():
-    # Find hapsic_controller.py
-    path = "apps/hapsic-controller/hapsic_controller.py"
-    spec = importlib.util.spec_from_file_location("hapsic_controller", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+# isort: split
+import hapsic_controller
 
 
 def test_telemetry_schema_integrity():
@@ -71,7 +12,7 @@ def test_telemetry_schema_integrity():
     Rigorously validates that the publish_telemetry method correctly maps
     internal state attributes to the MQTT JSON payload without silent fallbacks.
     """
-    module = load_controller()
+    module = hapsic_controller
     controller = module.HapsicController()
 
     # Mock the AppDaemon environment
@@ -126,12 +67,12 @@ def test_telemetry_schema_integrity():
     # Intercept Payload
     if not controller.call_service.called:
         print("❌ FAIL: call_service was never called.")
-        return False
+        raise AssertionError("Telemetry validation failed")
 
     args, kwargs = controller.call_service.call_args
     if kwargs.get("topic") != "hapsic/telemetry/state":
         print(f"❌ FAIL: Incorrect MQTT topic: {kwargs.get('topic')}")
-        return False
+        raise AssertionError("Telemetry validation failed")
 
     payload = json.loads(kwargs["payload"])
 
@@ -204,15 +145,14 @@ def test_telemetry_schema_integrity():
     if errors:
         for err in errors:
             print(err)
-        return False
+        raise AssertionError("Telemetry validation failed")
 
     print("✅ ALL TELEMETRY MAPPINGS VERIFIED. NO SILENT FALLBACKS DETECTED.")
-    return True
 
 
 def test_passive_import_advisory_math():
     """Validates observe-only outdoor moisture import telemetry."""
-    module = load_controller()
+    module = hapsic_controller
     controller = module.HapsicController()
 
     controller.supply_flow = 150.0
@@ -241,12 +181,6 @@ if __name__ == "__main__":
     print("  HAPSIC Telemetry Integrity Tests")
     print("=" * 60)
 
-    success = test_telemetry_schema_integrity()
-
-    print("\n  TOTAL: 1/1 passed" if success else "\n  TOTAL: 0/1 passed")
-    if not success:
-        print("  ❌ FAILURE: Telemetry schema contains broken mappings.")
-        sys.exit(1)
-    else:
-        print("  ✅ SUCCESS: Reporting layer is robust.")
-        sys.exit(0)
+    test_telemetry_schema_integrity()
+    test_passive_import_advisory_math()
+    print("\n  TOTAL: 2/2 passed")

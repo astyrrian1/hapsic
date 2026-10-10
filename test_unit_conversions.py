@@ -84,6 +84,7 @@ def assert_close(actual, expected, tol, label):
     else:
         fail_count += 1
         results.append(f"  ❌ {label}: got {actual:.6f}, expected {expected:.6f}, Δ={diff:.6f}, tol={tol}")
+        raise AssertionError(results[-1])
 
 def assert_true(condition, label):
     global pass_count, fail_count
@@ -92,6 +93,7 @@ def assert_true(condition, label):
     else:
         fail_count += 1
         results.append(f"  ❌ {label}")
+        raise AssertionError(results[-1])
 
 
 # -------------------------------------------------------------------------

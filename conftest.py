@@ -40,8 +40,9 @@ class _MockHass:
 
     def __init__(self):
         self.states = {}
+        self.args = {}
 
-    def get_state(self, entity_id):
+    def get_state(self, entity_id, attribute=None):
         return self.states.get(entity_id)
 
     def call_service(self, service, **kwargs):
