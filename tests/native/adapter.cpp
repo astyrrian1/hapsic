@@ -16,6 +16,7 @@ int main() {
   HapsicController controller;
   esphome::output::FloatOutput steam, fan;
   std::map<std::string, esphome::sensor::Sensor> sensors;
+  std::map<std::string, esphome::number::Number> numbers;
   controller.set_steam_dac(&steam);
   controller.set_fan_dac(&fan);
   controller.set_duct_temp_sensor(&sensors["duct_temp"]);
@@ -51,6 +52,21 @@ int main() {
       if (!(input >> name >> value) || !sensors.count(name))
         return 2;
       sensors.at(name).publish_state(std::stof(value));
+    } else if (command == "number") {
+      std::string name, value;
+      if (!(input >> name >> value))
+        return 2;
+      numbers[name].state = value == "missing" ? NAN : std::stof(value);
+      if (name == "kp_a")
+        controller.set_kp_a_number(&numbers[name]);
+      else if (name == "ki_a")
+        controller.set_ki_a_number(&numbers[name]);
+      else if (name == "kp_b")
+        controller.set_kp_b_number(&numbers[name]);
+      else if (name == "ki_b")
+        controller.set_ki_b_number(&numbers[name]);
+      else
+        return 2;
     } else if (command == "magnus") {
       std::string temperature, rh, pressure;
       if (!(input >> temperature >> rh >> pressure))

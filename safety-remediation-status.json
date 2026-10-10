@@ -44,7 +44,7 @@
     {
       "id": 6,
       "name": "Independent input validation",
-      "status": "in_progress",
+      "status": "complete",
       "increments": [
         {
           "id": "6a",
@@ -54,12 +54,12 @@
         {
           "id": "6b",
           "name": "RH and psychrometric domain validation in both controllers",
-          "status": "complete; local commit follows this execution record"
+          "status": "complete"
         },
         {
           "id": "6c",
           "name": "Native configurable gain validation",
-          "status": "RED tests in preparation"
+          "status": "complete; local commit follows this execution record"
         }
       ]
     },
@@ -123,7 +123,8 @@
     "3": "949fc46",
     "4": "7cc7084",
     "5a": "93c4ad1",
-    "6a": "00850c8"
+    "6a": "00850c8",
+    "6b": "76ff38a"
   },
   "evidence": {
     "1": "15 initial failing meta-tests plus 3 review failures; 92 pytest tests and full presubmit passed; review resolved import order and silent FSM failures.",
@@ -132,7 +133,8 @@
     "4": "11 Python and 2 native RED failures; shutdown fixes; all reviewer-requested retry/partial-init/active-native cases pass. Full presubmit with 127 pytest tests, production/desk/native builds passed. No blocking review issues.",
     "5": "Platform increment 5a: 21 tracker tests and integrated reconciliation/shutdown coverage total 48 passing focused tests. RED demonstrated fixed deadlines, missing provenance, report-read exceptions, concurrent reinitialization, and explicit ON with zero/missing/boolean brightness. Tracker and adapter reviews each completed three bounded cycles with substantive findings resolved. Final full presubmit passed (164 pytest tests, sanitizer coverage, and clean production/desk compilation); log /tmp/hapsic-final-guard-presubmit.log. Concrete qualified device transport and durable recovery remain incomplete; chunk 5 remains in progress.",
     "6a": "24 initial failing actual-source Python/C++ tests; follow-up RED for bool capacity, boolean parsing, and finite deeply negative target parity (4 more failures). All 78 input regressions pass; two adversarial cycles resolved target boundary mismatch. Existing adapter smoke fixture now supplies required flow/bypass. Complete presubmit passed with 242 pytest tests, sanitizer coverage, standalone suites and clean production/desk builds; log /tmp/hapsic-input-presubmit.log. No source freshness or durable recovery qualification claimed.",
-    "6b": "38 initial actual-source RED cases; four derived-observation failures; adversarial review added two REDs for unused fallback RH and inverse-Magnus denominator roundoff. Two bounded review cycles resolved all substantive findings. 150 focused input tests pass; complete presubmit passed with 314 pytest tests, sanitizer coverage, standalone suites and clean production/desk builds; log /tmp/hapsic-domain-presubmit.log. Source provenance and recovery qualification remain separate."
+    "6b": "38 initial actual-source RED cases; four derived-observation failures; adversarial review added two REDs for unused fallback RH and inverse-Magnus denominator roundoff. Two bounded review cycles resolved all substantive findings. 150 focused input tests pass; complete presubmit passed with 314 pytest tests, sanitizer coverage, standalone suites and clean production/desk builds; log /tmp/hapsic-domain-presubmit.log. Source provenance and recovery qualification remain separate.",
+    "6c": "40 actual-source native RED cases for missing/NaN/infinite/negative configured gains at startup and during natural active operation; optional defaults and zero coefficients valid. All 46 focused tests pass; fresh-context adversarial review found no substantive issues. Full presubmit passed with 360 pytest tests, sanitizer coverage, standalone suites, and clean production/desk firmware builds; log /tmp/hapsic-gain-presubmit.log. Python gains are fixed constants, so this is a native configuration-boundary increment."
   },
   "locked_contract": {
     "critical_input_expiry_seconds": 60,
@@ -221,5 +223,11 @@
     "status": "Complete: two RED contract tests pass; adversarial review clear; final clean full presubmit exit 0.",
     "commit": "2900732"
   },
-  "implementation_order_note": "Transport qualification work for 5b continues; independent paired Python/C++ input fixes proceed while its protocol and scheduling regressions are prepared. No user engineering decision is pending."
+  "implementation_order_note": "Transport qualification work for 5b continues; independent paired Python/C++ input fixes proceed while its protocol and scheduling regressions are prepared. No user engineering decision is pending.",
+  "prepared_regressions": {
+    "5b": "Callable RPC and worker-scheduler acceptance drafts in /tmp/hapsic-rpc-regressions; not implemented or claimed passing.",
+    "7": "Two actual-source RED cases: raw Shelly RH88 concealed by cleansed RH35 at startup and during active output. Drafts in /tmp/hapsic-input-domain-regressions; fix pending.",
+    "8": "Eight actual-source RED cases plus four preservation cases in /tmp/hapsic-nameplate-regressions: trained curves/CHI alter control at fixed nameplate; changes to validated nameplate must still affect control. Fix pending."
+  },
+  "current_release_status": "Not deployable: 5b and chunks7-16 remain unfinished; transport, source freshness, durable recovery and independent host-loss shutdown are not qualified."
 }

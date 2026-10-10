@@ -365,6 +365,12 @@ const char *HapsicController::state_name(State s) {
 
 bool HapsicController::read_sensors() {
   pending_sensor_fault_reason_ = "Sensor Failure";
+  for (auto *gain : {kp_a_number_, ki_a_number_, kp_b_number_, ki_b_number_}) {
+    if (gain != nullptr && (!std::isfinite(gain->state) || gain->state < 0.0f)) {
+      pending_sensor_fault_reason_ = "Invalid configured control gain";
+      return false;
+    }
+  }
 
   // Fresh impossible RH is an input fault, not a missing report eligible for
   // cache/EMA substitution. Check before updating any valid-sample timestamps.
