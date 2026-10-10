@@ -3,7 +3,8 @@
 #include <iostream>
 #include <sstream>
 // Isolated test-only access. Standard/platform headers are loaded first. The
-// controller source is compiled in this TU unchanged; private access is read-only.
+// Controller source is compiled unchanged; private access exposes snapshots and
+// explicit fault injection, never synthesized state alignment between engines.
 #define private public
 #include "components/hapsic/hapsic.cpp"
 #undef private
@@ -36,6 +37,8 @@ int main() {
     input >> command;
     if (command == "setup") {
       controller.setup();
+    } else if (command == "fault") {
+      controller.trigger_fault("injected hazard");
     } else if (command == "clock" || command == "tick") {
       uint32_t now;
       if (!(input >> now))
@@ -61,6 +64,7 @@ int main() {
                 << "\""
                 << ",\"steam_level\":" << steam.level << ",\"fan_level\":" << fan.level
                 << ",\"steam_writes\":" << steam.writes.size() << ",\"fan_writes\":" << fan.writes.size()
+                << ",\"first_steam_write_ms\":" << (steam.write_times.empty() ? -1 : int64_t(steam.write_times.front()))
                 << ",\"duct_temp_c\":" << controller.duct_temp_ << ",\"duct_rh\":" << controller.duct_rh_ << "}\n";
     } else if (!command.empty()) {
       std::cerr << "Unknown command: " << command << '\n';

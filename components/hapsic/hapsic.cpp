@@ -105,6 +105,7 @@ float MagnusTetens::target_dp_from_w(float w_g_kg, float pressure_kpa) {
 // =============================================================================
 
 void HapsicController::setup() {
+  force_safe_outputs();
   ESP_LOGI("hapsic", "HAPSIC 2.2 Gold Master — Safety Park Boot");
 
   // Allow hardware to settle before probing M5 internal buses
@@ -126,11 +127,6 @@ void HapsicController::setup() {
   esp_task_wdt_init(&wdt_config);
   esp_task_wdt_add(NULL);  // Add current task (main loop)
 #endif
-
-  if (steam_dac_)
-    steam_dac_->set_level(0.0f);
-  if (fan_dac_)
-    fan_dac_->set_level(0.0f);
 
   fsm_state_ = INITIALIZING;
   fault_reason_ = "NONE";
@@ -643,12 +639,12 @@ bool HapsicController::execute_interlocks() {
 }
 
 void HapsicController::trigger_fault(const std::string &reason) {
+  force_safe_outputs();
   if (fsm_state_ != FAULT && fsm_state_ != MAINTENANCE_LOCKOUT) {
     ESP_LOGW("hapsic", "FAULT: %s", reason.c_str());
     fsm_state_ = FAULT;
     fault_reason_ = reason;
     fault_clear_ticks_ = FAULT_CLEAR_TICKS;
-    force_safe_outputs();
   }
 }
 
@@ -657,6 +653,7 @@ void HapsicController::force_safe_outputs() {
   fan_voltage_ = 0.0f;
   integrator_a_ = 0.0f;
   integrator_b_ = 0.0f;
+  write_output();
 }
 
 void HapsicController::reset_control_state() {

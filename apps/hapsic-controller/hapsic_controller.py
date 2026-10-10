@@ -15,6 +15,17 @@ class HapsicController(hass.Hass):
     SENSOR_LOSS_GRACE_SECONDS = 60.0
 
     def initialize(self):
+        self._initialization_failed = False
+        self.request_output_off()
+        try:
+            self._initialize_state()
+        except Exception as error:
+            self._initialization_failed = True
+            self.trigger_fault(f"Initialization failed ({type(error).__name__})")
+        finally:
+            self.run_every(self.master_tick, "now", 5)
+
+    def _initialize_state(self):
         """
         HAPSIC 2.7.4
         Includes:
@@ -164,13 +175,37 @@ class HapsicController(hass.Hass):
             self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
 
         # --- 3. RESTART HANDLING (Safety Park) ---
-        self.log("SYSTEM RESTART DETECTED: Executing Safety Park Protocol...", level="WARNING")
-        self.call_service("button/press", entity_id="button.zehnder_comfoair_q_a4cb9c_boost_off")
-        self.call_service("switch/turn_on", entity_id="switch.zehnder_comfoair_q_a4cb9c_auto_ventilation")
-        self.turn_off(self.SHELLY_LIGHT_ENTITY)
-        self.log("SAFETY PARK COMPLETE: Fan -> Auto, Valve -> 0V. Entering STANDBY.")
+        self.park_ventilation()
+        self.safe_log("Safety park requested; actuator shutdown is not physically verified.")
 
-        self.run_every(self.master_tick, "now", 5)
+    def safe_log(self, message, level="INFO"):
+        try:
+            self.log(message, level=level)
+        except Exception:
+            # Logging must never prevent an actuator shutdown or its next retry.
+            pass
+
+    def request_output_off(self):
+        self.steam_voltage = 0.0
+        try:
+            self.turn_off(self.SHELLY_LIGHT_ENTITY)
+        except Exception as error:
+            self._off_dispatch_failed = True
+            self.safe_log(f"OFF dispatch failed ({type(error).__name__}); retry required", level="ERROR")
+            return False
+        self._off_dispatch_failed = False
+        self.last_brightness = 0
+        return True
+
+    def park_ventilation(self):
+        for service, entity in (
+            ("button/press", "button.zehnder_comfoair_q_a4cb9c_boost_off"),
+            ("switch/turn_on", "switch.zehnder_comfoair_q_a4cb9c_auto_ventilation"),
+        ):
+            try:
+                self.call_service(service, entity_id=entity)
+            except Exception as error:
+                self.safe_log(f"Ventilation park failed ({type(error).__name__})", level="ERROR")
 
     # =========================================================================
     # 2.3 EQUATION 4 (MAGNUS-TETENS) & REVERSE
@@ -633,6 +668,15 @@ class HapsicController(hass.Hass):
     # =========================================================================
 
     def master_tick(self, kwargs):
+        if self._initialization_failed or self._off_dispatch_failed:
+            self.request_output_off()
+            return
+        try:
+            self._control_tick(kwargs)
+        except Exception as error:
+            self.trigger_fault(f"Control exception ({type(error).__name__})")
+
+    def _control_tick(self, kwargs):
         now = time.time()
         self.dt = now - self.last_tick_ts
         self.last_tick_ts = now
@@ -657,6 +701,10 @@ class HapsicController(hass.Hass):
         if not valid_sensors:
             startup_age = now - self.startup_ts
             if startup_age < 90.0:
+                self.request_output_off()
+                self.stasis_active = False
+                if self.fsm_state != "FAULT":
+                    self.fsm_state = "STANDBY"
                 self.log(
                     f"HAL: Sensors not ready ({startup_age:.0f}s "
                     f"since startup). Waiting in STANDBY.",
@@ -875,13 +923,9 @@ class HapsicController(hass.Hass):
                 self.call_service("switch/turn_on", entity_id="switch.zehnder_comfoair_q_a4cb9c_auto_ventilation")
 
     def trigger_fault(self, reason):
-        if self.fsm_state != "FAULT":
-            self.log(f"FSM: FAULT TRIGGERED - {reason}", level="ERROR")
-            self.fsm_state = "FAULT"
-            self.fault_reason = reason
-            self.call_service("button/press", entity_id="button.zehnder_comfoair_q_a4cb9c_boost_off")
-            self.call_service("switch/turn_on", entity_id="switch.zehnder_comfoair_q_a4cb9c_auto_ventilation")
-
+        entering_fault = getattr(self, "fsm_state", None) != "FAULT"
+        self.fsm_state = "FAULT"
+        self.fault_reason = reason
         self.steam_voltage = 0.0
         self.integrator_a = 0.0
         self.integrator_b = 0.0
@@ -891,7 +935,10 @@ class HapsicController(hass.Hass):
         self.boil_achieved = False
         self.upward_rate_ticks = 0
         self.downward_rate_ticks = 0
-        self.write_output()
+        self.request_output_off()
+        if entering_fault:
+            self.safe_log(f"FSM: FAULT TRIGGERED - {reason}", level="ERROR")
+            self.park_ventilation()
 
     # =========================================================================
     # 6. PID LOOPS
@@ -1052,7 +1099,8 @@ class HapsicController(hass.Hass):
     def write_output(self):
         physical_volts = self.steam_voltage
         if physical_volts < 2.0:
-            physical_volts = 0.0
+            self.request_output_off()
+            return
 
         brightness = int((physical_volts / 10.0) * 255)
         brightness = max(0, min(255, brightness))
@@ -1060,15 +1108,9 @@ class HapsicController(hass.Hass):
         # Closed-loop override logic
         ha_state = self.get_state(self.SHELLY_LIGHT_ENTITY)
 
-        if brightness == 0:
-            if ha_state != "off":
-                self.log(f"SAFETY: Shelly is {ha_state} but requested 0%. Forcing OFF.", level="WARNING")
-                self.turn_off(self.SHELLY_LIGHT_ENTITY)
-                self.last_brightness = 0
-        else:
-            if brightness != self.last_brightness or ha_state == "off":
-                self.turn_on(self.SHELLY_LIGHT_ENTITY, brightness=brightness)
-                self.last_brightness = brightness
+        if brightness != self.last_brightness or ha_state == "off":
+            self.turn_on(self.SHELLY_LIGHT_ENTITY, brightness=brightness)
+            self.last_brightness = brightness
 
     # =========================================================================
     # 8 & 9. DIAGNOSTICS & TELEMETRY

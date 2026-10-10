@@ -1,0 +1,117 @@
+{
+  "purpose": "Execution record for the approved safety remediation plan; incomplete work is not release qualified.",
+  "branch": "codex/safety-remediation",
+  "workflow": "RED, GREEN, adversarial review, full presubmit, atomic local commit",
+  "chunks": [
+    {
+      "id": 1,
+      "name": "Trustworthy tests",
+      "status": "complete"
+    },
+    {
+      "id": 2,
+      "name": "Reproducible validation",
+      "status": "complete"
+    },
+    {
+      "id": 3,
+      "name": "Actual-code adapters",
+      "status": "complete"
+    },
+    {
+      "id": 4,
+      "name": "Independent OFF paths",
+      "status": "complete"
+    },
+    {
+      "id": 5,
+      "name": "Actuator command reconciliation",
+      "status": "pending"
+    },
+    {
+      "id": 6,
+      "name": "Independent input validation",
+      "status": "pending"
+    },
+    {
+      "id": 7,
+      "name": "Original source freshness",
+      "status": "pending"
+    },
+    {
+      "id": 8,
+      "name": "Observe-only learning",
+      "status": "pending"
+    },
+    {
+      "id": 9,
+      "name": "C++ unit boundaries",
+      "status": "pending"
+    },
+    {
+      "id": 10,
+      "name": "Final clamps and elapsed-time policy",
+      "status": "pending"
+    },
+    {
+      "id": 11,
+      "name": "Durable safety state and recovery",
+      "status": "pending"
+    },
+    {
+      "id": 12,
+      "name": "Reachable bounded turbo",
+      "status": "pending"
+    },
+    {
+      "id": 13,
+      "name": "Diagnostic learning persistence",
+      "status": "pending"
+    },
+    {
+      "id": 14,
+      "name": "Firmware lifetime and telemetry",
+      "status": "pending"
+    },
+    {
+      "id": 15,
+      "name": "Strict complete parity",
+      "status": "pending"
+    },
+    {
+      "id": 16,
+      "name": "Packaging and bounded cleanup",
+      "status": "pending"
+    }
+  ],
+  "completed_commits": {
+    "1": "197bc0d",
+    "2": "8b8605a",
+    "3": "949fc46"
+  },
+  "evidence": {
+    "1": "15 initial failing meta-tests plus 3 review failures; 92 pytest tests and full presubmit passed; review resolved import order and silent FSM failures.",
+    "2": "4 initial pipeline failures plus environment/PATH regressions; full presubmit passed with pinned isolated environments; 3 bounded review cycles resolved both environment selection defects.",
+    "3": "Missing Python/native adapter RED, clock leakage and interleaved-rig RED; full presubmit passed including sanitizer builds; isolated module globals resolved review finding.",
+    "4": "11 Python and 2 native RED failures; shutdown fixes; all reviewer-requested retry/partial-init/active-native cases pass. Full presubmit with 127 pytest tests, production/desk/native builds passed. No blocking review issues."
+  },
+  "locked_contract": {
+    "critical_input_expiry_seconds": 60,
+    "maximum_critical_report_interval_seconds": 30,
+    "command_ack_deadline_seconds": 15,
+    "reconciliation_interval_seconds": 5,
+    "qualified_off_restart_seconds": 300,
+    "stasis_seconds": 180,
+    "thermal_memory_seconds": 900,
+    "healthy_recovery_seconds": 60,
+    "learning_control_policy": "nameplate only; learning and CHI observe-only",
+    "unclean_or_untrusted_startup": "manual re-arm; dirty marker must be durable before ON",
+    "source_of_truth": "apps/hapsic-controller/hapsic_controller.py",
+    "cross_model_review": "Not performed; optional offers made. No external CLI invoked."
+  },
+  "release_prerequisites": [
+    "Independent host-loss shutdown remains unverified.",
+    "Qualify actual sensor report cadence, actuator transport/readback, and durable storage.",
+    "Desk fault injection with steam disconnected before production; no deployment, flashing, or release authorized in this implementation."
+  ]
+}

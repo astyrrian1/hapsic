@@ -101,9 +101,11 @@ class FloatOutput {
  public:
   float level = NAN;
   std::vector<float> writes;
+  std::vector<uint32_t> write_times;
   void set_level(float v) {
     level = v;
     writes.push_back(v);
+    write_times.push_back(millis());
   }
 };
 }  // namespace output
