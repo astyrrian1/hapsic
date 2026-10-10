@@ -87,5 +87,9 @@ bash run_presubmit.sh
 ```
 
 The complete gate runs lint, pytest, production/desk firmware compilation, native
-simulation, and the standalone suites. Presence-only simulation checks are smoke
-coverage, not proof of mathematical or physical safety equivalence.
+simulation, and the standalone suites. Production and desk builds start with
+`esphome clean`, so the gate requires dependency downloads and recompilation.
+M5GFX 0.2.19 is pinned to its official Git commit in component code generation;
+do not add duplicate library versions in the device YAML files.
+Presence-only simulation checks are smoke coverage, not proof of mathematical
+or physical safety equivalence.

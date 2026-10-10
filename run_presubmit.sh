@@ -77,6 +77,7 @@ echo "✓ Desk YAML valid."
 # 4. ESPHome desk compilation
 echo ""
 echo "=== 4. ESPHome Desk Firmware Compilation ==="
+esphome clean stamplc_desk.yaml
 esphome compile stamplc_desk.yaml
 echo "✓ Desk firmware compiled successfully."
 

@@ -70,3 +70,18 @@ def test_aggregate_runner_cannot_use_an_old_combined_esphome_install(tmp_path):
     (local_bin / "activate").write_text(f'export PATH={shlex.quote(str(local_bin))}:"$PATH"\n')
     result = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=10)
     assert result.returncode == 91, result.stdout + result.stderr
+
+
+def test_m5gfx_uses_available_immutable_release_source():
+    """The registry pin fails clean installs; resolve the same release from Git."""
+    codegen = (ROOT / "components/hapsic/__init__.py").read_text()
+    assert "https://github.com/m5stack/M5GFX.git#53a7184601f3667b030ba141c58b87ce2acfaa2a" in codegen
+    for filename in ("stamplc.yaml", "stamplc_desk.yaml", "stamplc_hil.yaml"):
+        assert "m5stack/M5GFX@0.2.19" not in (ROOT / filename).read_text()
+
+
+def test_required_firmware_builds_discard_previous_binaries():
+    for filename, config in (("run_presubmit.sh", "stamplc_desk.yaml"), ("verify.sh", "stamplc.yaml")):
+        commands = (ROOT / filename).read_text()
+        assert f"esphome clean {config}" in commands
+        assert commands.index(f"esphome clean {config}") < commands.index(f"esphome compile {config}")
