@@ -26,7 +26,20 @@
     {
       "id": 5,
       "name": "Actuator command reconciliation",
-      "status": "pending"
+      "status": "in_progress",
+      "dependency": "Agent-owned transport investigation; no user decision required. Qualified completion/recovery remains required before operation can be released.",
+      "increments": [
+        {
+          "id": "5a",
+          "name": "Fail-closed HA command bookkeeping and reconciliation",
+          "status": "complete; local commit follows this execution record"
+        },
+        {
+          "id": "5b",
+          "name": "Concrete qualified device completion adapter and recovery integration",
+          "status": "pending"
+        }
+      ]
     },
     {
       "id": 6,
@@ -87,13 +100,15 @@
   "completed_commits": {
     "1": "197bc0d",
     "2": "8b8605a",
-    "3": "949fc46"
+    "3": "949fc46",
+    "4": "7cc7084"
   },
   "evidence": {
     "1": "15 initial failing meta-tests plus 3 review failures; 92 pytest tests and full presubmit passed; review resolved import order and silent FSM failures.",
     "2": "4 initial pipeline failures plus environment/PATH regressions; full presubmit passed with pinned isolated environments; 3 bounded review cycles resolved both environment selection defects.",
     "3": "Missing Python/native adapter RED, clock leakage and interleaved-rig RED; full presubmit passed including sanitizer builds; isolated module globals resolved review finding.",
-    "4": "11 Python and 2 native RED failures; shutdown fixes; all reviewer-requested retry/partial-init/active-native cases pass. Full presubmit with 127 pytest tests, production/desk/native builds passed. No blocking review issues."
+    "4": "11 Python and 2 native RED failures; shutdown fixes; all reviewer-requested retry/partial-init/active-native cases pass. Full presubmit with 127 pytest tests, production/desk/native builds passed. No blocking review issues.",
+    "5": "Platform increment 5a: 21 tracker tests and integrated reconciliation/shutdown coverage total 48 passing focused tests. RED demonstrated fixed deadlines, missing provenance, report-read exceptions, concurrent reinitialization, and explicit ON with zero/missing/boolean brightness. Tracker and adapter reviews each completed three bounded cycles with substantive findings resolved. Final full presubmit passed (164 pytest tests, sanitizer coverage, and clean production/desk compilation); log /tmp/hapsic-final-guard-presubmit.log. Concrete qualified device transport and durable recovery remain incomplete; chunk 5 remains in progress."
   },
   "locked_contract": {
     "critical_input_expiry_seconds": 60,
@@ -107,11 +122,79 @@
     "learning_control_policy": "nameplate only; learning and CHI observe-only",
     "unclean_or_untrusted_startup": "manual re-arm; dirty marker must be durable before ON",
     "source_of_truth": "apps/hapsic-controller/hapsic_controller.py",
-    "cross_model_review": "Not performed; optional offers made. No external CLI invoked."
+    "cross_model_review": "Not performed; optional offers made. No external CLI invoked.",
+    "output_operating_range_volts": [
+      3.5,
+      9.5
+    ],
+    "duct_rh_force_off_percent": 88,
+    "final_limits_dominate": [
+      "stasis",
+      "slew",
+      "restart"
+    ],
+    "restart_step": "Explicit minimum operating-voltage step, then final safety limits",
+    "turbo": {
+      "pre_limit_demand_volts_above": 9.5,
+      "duct_rh_percent_above": 82,
+      "room_deficit_f_above": 3,
+      "confirm_flow_cfm_above": 200,
+      "confirmation_timeout_seconds": 60,
+      "lockout_seconds": 1800,
+      "exclude_initial_stasis": true
+    },
+    "manual_latches": [
+      "maintenance imbalance",
+      "E-stop",
+      "uncertain output",
+      "untrusted startup"
+    ],
+    "reset": "Fresh post-fault reset after 60 continuous seconds of healthy fresh inputs; pre-held reset is invalid",
+    "persistence": "Separate versioned safety and learning records. Dirty marker durable before ON; failed persistence inhibits. Missing/corrupt/unreadable/dirty safety data requires manual re-arm.",
+    "clean_shutdown": "Only after qualified reported OFF and no unresolved ON",
+    "capacity": "Validated positive finite nameplate; no learned curve or CHI actuation influence",
+    "canonical_internal_mass": "lb/h; preserve ESPHome SI sensor input interfaces",
+    "legacy_learning": "Preserve backups; imported curves untrusted; never fabricate sample counts",
+    "physical_shutdown": "Service/RPC acknowledgements and reported OFF do not establish physical shutdown"
   },
   "release_prerequisites": [
     "Independent host-loss shutdown remains unverified.",
     "Qualify actual sensor report cadence, actuator transport/readback, and durable storage.",
     "Desk fault injection with steam disconnected before production; no deployment, flashing, or release authorized in this implementation."
-  ]
+  ],
+  "open_decisions": [],
+  "transport_findings": {
+    "status": "Investigated by agent; not waiting on user",
+    "ha_success": "Not a device-completion certificate: current upstream Shelly authentication exceptions and unavailable entity filtering can return normally without a completed command.",
+    "implementation": "HA callbacks only enqueue acceptance. Tracker retains pending ON until separately qualified command-correlated device completion plus subsequent matching report. Unknown delivery latches OFF; reinitialization preserves pending requests.",
+    "remaining": "Qualify and implement a concrete stronger transport adapter and recovery procedure; no generic reset may erase unresolved ON. Current HA-only guard will latch after 15 seconds for unresolved ON.",
+    "sources": [
+      "https://github.com/home-assistant/core/blob/dev/homeassistant/components/shelly/entity.py",
+      "https://github.com/home-assistant/core/blob/dev/homeassistant/helpers/service.py",
+      "https://github.com/home-assistant-libs/aioshelly/blob/master/aioshelly/rpc_device/wsrpc.py",
+      "https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Light/"
+    ],
+    "qualification": "Reviewed upstream source, not installed runtime versions or physical hardware.",
+    "next_adapter": {
+      "approach": "Direct Shelly POST /rpc with session/generation identity and strict id/src/dst validation; HA OFF fallback remains separate.",
+      "default": "Inhibited until transport and device configuration are qualified; settings alone are not qualification.",
+      "required_tests": [
+        "No hidden redirects or ambiguous ON retries",
+        "OFF has independent bounded transport resources",
+        "Recheck inhibition immediately before transport admission",
+        "Mark ON unresolved before submission",
+        "Status query dispatched after all relevant completions; invalidate evidence epoch on new ON",
+        "Late ON completion requires renewed OFF qualification",
+        "Timeout or reconnect cannot erase unresolved ON",
+        "Persist uncertainty across process restart"
+      ],
+      "review": "Fresh-context adversarial architecture review complete; required corrections incorporated; no external cross-model invocation."
+    }
+  },
+  "validation_followup": {
+    "issue": "Clean build exposed unavailable registry artifact m5stack/M5GFX@0.2.19; cached presubmit was not fresh compilation evidence.",
+    "fix": "Pin exact official 0.2.19 Git SHA in component codegen, remove duplicate YAML pins, require esphome clean before production/desk compilation.",
+    "status": "Complete: two RED contract tests pass; adversarial review clear; final clean full presubmit exit 0.",
+    "commit": "2900732"
+  }
 }

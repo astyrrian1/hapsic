@@ -1,9 +1,131 @@
 import json
 import math
+import queue
+import threading
 import time
 import traceback
+from datetime import datetime
 
 import appdaemon.plugins.hass.hassapi as hass
+
+
+class OutputCommandTracker:
+    """Single-owner bookkeeping; callback threads must enqueue acknowledgements.
+
+    Service acceptance is not device execution. Reports must retain their source
+    identity and a validated original timestamp mapped to the monotonic clock.
+    """
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.generation = 0
+        self.requested_brightness = 0
+        self.reported_brightness = None
+        self.pending_on = {}
+        self.completed_on = set()
+        self.last_device_completion_at = None
+        self.oldest_on_at = None
+        self.last_send_at = None
+        self.last_off_at = None
+        self.last_on_ack_at = None
+        self.off_since = None
+        self.uncertain = False
+        self.report_id = None
+        self.report_at = None
+
+    def poll(self):
+        now = self.clock()
+        if self.oldest_on_at is not None and now - self.oldest_on_at >= 15:
+            self.uncertain = True
+        if self.report_at is None or now - self.report_at > 60:
+            self.off_since = None
+
+    def sent(self, brightness):
+        self.poll()
+        if type(brightness) is not int or not 0 <= brightness <= 255:
+            raise ValueError("Invalid output command")
+        if brightness and self.uncertain:
+            raise ValueError("Output delivery uncertain; ON inhibited")
+        now = self.clock()
+        self.generation += 1
+        self.requested_brightness = brightness
+        self.last_send_at = now
+        self.off_since = None
+        if brightness:
+            self.pending_on[self.generation] = False
+            if self.oldest_on_at is None:
+                self.oldest_on_at = now
+        else:
+            self.last_off_at = now
+        return self.generation
+
+    def acknowledge(self, generation, success):
+        self.poll()
+        if generation not in self.pending_on:
+            return
+        if success is not True:
+            # An error/timeout cannot prove the integration never sent the ON.
+            self.uncertain = True
+            return
+        self.pending_on[generation] = True
+        self.last_on_ack_at = self.clock()
+
+    def device_completed(self, generation):
+        """Record qualified, command-correlated completion, never HA acceptance.
+
+        The transport adapter must bind this generation to this tracker/session
+        and exact device/component. A timeout, reconnect, or uncorrelated state
+        report cannot call this method. Completion does not prove physical OFF.
+        """
+        self.poll()
+        if type(generation) is not int or generation not in self.pending_on:
+            return
+        if generation in self.completed_on:
+            return
+        self.completed_on.add(generation)
+        self.last_device_completion_at = self.clock()
+
+    def observe(self, brightness, report_id, reported_at):
+        self.poll()
+        now = self.clock()
+        if report_id == self.report_id:
+            return
+        if (not report_id or type(brightness) is not int or not 0 <= brightness <= 255
+                or not isinstance(reported_at, (int, float)) or not math.isfinite(reported_at)
+                or not 0 <= now - reported_at <= 60):
+            self.reported_brightness = None
+            self.off_since = None
+            return
+        if self.report_at is not None and reported_at <= self.report_at:
+            return
+        self.report_id = report_id
+        self.report_at = reported_at
+        self.reported_brightness = brightness
+        if brightness:
+            self.off_since = None
+            if self.requested_brightness == 0:
+                self.uncertain = True
+        after_send = self.last_send_at is not None and reported_at > self.last_send_at
+        # All outstanding commands need separate qualified completion evidence.
+        # The subsequent report checks the final target, not physical shutdown.
+        completed = self.pending_on.keys() <= self.completed_on
+        after_completion = (self.last_device_completion_at is None
+                            or reported_at > self.last_device_completion_at)
+        if brightness == self.requested_brightness and completed and after_completion and after_send:
+            self.pending_on.clear()
+            self.completed_on.clear()
+            self.oldest_on_at = None
+            if brightness == 0 and self.last_off_at is not None and reported_at > self.last_off_at:
+                if self.off_since is None:
+                    self.off_since = now
+
+    def rearm(self, *, healthy_seconds):
+        self.poll()
+        if (type(healthy_seconds) not in (int, float) or not math.isfinite(healthy_seconds)
+                or healthy_seconds < 60 or self.pending_on or self.off_since is None):
+            return False
+        self.uncertain = False
+        return True
 
 
 class HapsicController(hass.Hass):
@@ -15,6 +137,17 @@ class HapsicController(hass.Hass):
     SENSOR_LOSS_GRACE_SECONDS = 60.0
 
     def initialize(self):
+        if not hasattr(self, "_output_lock"):
+            self._output_lock = threading.RLock()
+        with self._output_lock:
+            self._initialize_locked()
+
+    def _initialize_locked(self):
+        if not hasattr(self, "output_commands"):
+            self.output_commands = OutputCommandTracker(time.monotonic)
+            self._output_results = queue.SimpleQueue()
+        elif self.output_commands.pending_on:
+            self.output_commands.uncertain = True
         self._initialization_failed = False
         self.request_output_off()
         try:
@@ -185,10 +318,78 @@ class HapsicController(hass.Hass):
             # Logging must never prevent an actuator shutdown or its next retry.
             pass
 
+    def dispatch_output(self, brightness):
+        with self._output_lock:
+            self._dispatch_output_locked(brightness)
+
+    def _dispatch_output_locked(self, brightness):
+        """Callbacks enqueue only; the serialized controller owns all bookkeeping."""
+        generation = self.output_commands.sent(brightness)
+        results = self._output_results
+
+        def completed(result):
+            # HA completion is never promoted to qualified device completion.
+            success = isinstance(result, dict) and result.get("success") is True
+            results.put((generation, success))
+
+        service = "light/turn_on" if brightness else "light/turn_off"
+        data = {"brightness": brightness} if brightness else {}
+        try:
+            self.call_service(service, entity_id=self.SHELLY_LIGHT_ENTITY,
+                              callback=completed, hass_timeout=10, **data)
+        except Exception:
+            self.output_commands.uncertain = True
+            raise
+
+    def reconcile_output(self):
+        with self._output_lock:
+            self._reconcile_output_locked()
+
+    def _reconcile_output_locked(self):
+        while True:
+            try:
+                generation, success = self._output_results.get_nowait()
+            except queue.Empty:
+                break
+            self.output_commands.acknowledge(generation, success)
+            if not success:
+                self.output_commands.uncertain = True
+        self.output_commands.poll()
+        try:
+            report = self.get_state(self.SHELLY_LIGHT_ENTITY, attribute="all")
+            if not isinstance(report, dict):
+                raise ValueError("Output report has no provenance")
+            identity = report["last_reported"]
+            stamp = datetime.fromisoformat(identity)
+            if stamp.tzinfo is None:
+                raise ValueError("Output timestamp has no timezone")
+            reported_at = time.monotonic() - (time.time() - stamp.timestamp())
+            if report["state"] == "off":
+                brightness = 0
+            elif report["state"] == "on":
+                # The ON state is a hazard independently of its brightness data.
+                if (self.output_commands.requested_brightness == 0
+                        and 0 <= time.monotonic() - reported_at <= 60):
+                    self.output_commands.uncertain = True
+                brightness = report.get("attributes", {}).get("brightness")
+                if type(brightness) is not int or not 0 < brightness <= 255:
+                    raise ValueError("ON report cannot qualify as OFF")
+            else:
+                raise ValueError("Output state unavailable")
+            self.output_commands.observe(brightness, identity, reported_at)
+        except Exception:
+            # Report failures must not prevent deadline checks or OFF dispatch.
+            self.output_commands.reported_brightness = None
+            self.output_commands.off_since = None
+
     def request_output_off(self):
+        with self._output_lock:
+            return self._request_output_off()
+
+    def _request_output_off(self):
         self.steam_voltage = 0.0
         try:
-            self.turn_off(self.SHELLY_LIGHT_ENTITY)
+            self.dispatch_output(0)
         except Exception as error:
             self._off_dispatch_failed = True
             self.safe_log(f"OFF dispatch failed ({type(error).__name__}); retry required", level="ERROR")
@@ -668,6 +869,17 @@ class HapsicController(hass.Hass):
     # =========================================================================
 
     def master_tick(self, kwargs):
+        with self._output_lock:
+            self.reconcile_output()
+            if self._initialization_failed or self._off_dispatch_failed:
+                self.request_output_off()
+                return
+            if self.output_commands.uncertain:
+                self.trigger_fault("Output command delivery uncertain; manual re-arm required")
+                return
+            self._guarded_control_tick(kwargs)
+
+    def _guarded_control_tick(self, kwargs):
         if self._initialization_failed or self._off_dispatch_failed:
             self.request_output_off()
             return
@@ -1097,6 +1309,14 @@ class HapsicController(hass.Hass):
         self.steam_voltage = next_voltage
 
     def write_output(self):
+        with self._output_lock:
+            self.reconcile_output()
+            if self.output_commands.uncertain:
+                self.request_output_off()
+                return
+            self._write_output()
+
+    def _write_output(self):
         physical_volts = self.steam_voltage
         if physical_volts < 2.0:
             self.request_output_off()
@@ -1109,7 +1329,7 @@ class HapsicController(hass.Hass):
         ha_state = self.get_state(self.SHELLY_LIGHT_ENTITY)
 
         if brightness != self.last_brightness or ha_state == "off":
-            self.turn_on(self.SHELLY_LIGHT_ENTITY, brightness=brightness)
+            self.dispatch_output(brightness)
             self.last_brightness = brightness
 
     # =========================================================================
