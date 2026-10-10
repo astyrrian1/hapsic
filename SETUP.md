@@ -4,38 +4,28 @@ This guide walks you through setting up your local environment to compile, simul
 
 ## 1. System Requirements
 
-HAPSIC is developed identically across C++ and Python. You will need:
-- **Python 3.11** or **3.12**
-- A Unix-based terminal (macOS or Linux) is strongly recommended for executing the `.sh` test scripts.
+Use Python **3.14.3** for tests and Python **3.13.1** for ESPHome, matching CI.
+A C++ compiler and a Unix shell (macOS or Linux) are required for native tests.
 
 ## 2. Installing the Toolchain
 
-### A. Python & Simulation Dependencies
-The HAPSIC testing suite natively executes the `hapsic.py` physics simulator. 
-We strongly recommend using a virtual environment.
+Create two environments from the repository root. ESPHome pins MQTT client 1.x;
+the optional live harness uses MQTT client 2.x, so they cannot share an environment.
 
 ```bash
-# Create and activate a virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install the Python code style Linter 
-pip install ruff
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+python3.13 -m venv .venv-firmware
+.venv-firmware/bin/python -m pip install -r requirements-firmware.txt
+git config core.hooksPath .githooks
+source .venv/bin/activate
+export PATH="$PWD/scripts:$PATH"
 ```
 
-### B. ESPHome (Native Compilation)
-ESPHome acts as our C++ compiler and firmware packager. It takes our YAML configurations and `.cpp` logic and translates them into an ESP32 executable.
-
-```bash
-pip install esphome
-```
-
-### C. C++ Static Analysis (Optional but Recommended)
-To contribute to the core `hapsic.cpp` engine, you must format your C++ code.
-- **macOS (Homebrew)**: `brew install clang-format`
-- **Ubuntu/Debian**: `sudo apt-get install clang-format`
-
----
+The checked-in ESPHome wrapper uses `.venv-firmware`. Presubmit selects it
+automatically and requires the pre-push hook. Formatter and build-tool versions
+are pinned, and production/desk external components use immutable revisions.
+The Python controller source is `apps/hapsic-controller/hapsic_controller.py`.
 
 ## 3. Configuring the Workstation
 
@@ -93,7 +83,9 @@ Before writing custom code or deploying the device into a mechanical room, verif
 chmod +x *.sh
 
 # Execute the master test gateway
-./run_all_tests.sh
+bash run_presubmit.sh
 ```
 
-If the console outputs `✅ [SUCCESS] Native C++ and Python Simulator Traces completely match!`, your development environment is fully operational.
+The complete gate runs lint, pytest, production/desk firmware compilation, native
+simulation, and the standalone suites. Presence-only simulation checks are smoke
+coverage, not proof of mathematical or physical safety equivalence.

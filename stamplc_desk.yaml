@@ -74,9 +74,9 @@ i2c:
 
 # Import external components
 external_components:
-  - source: github://yoziru/esphome-zehnder-comfoair@main
+  - source: github://yoziru/esphome-zehnder-comfoair@6d11d0d1f4e24c7ad8349b68736f89852a62a3df
     components: [ zehnder_comfoair_q ]
-  - source: github://jenscski/esphome-components@main
+  - source: github://jenscski/esphome-components@1216908e361b1921233fd0e3a90bb08674407868
     components: [ aw9523 ]
   - source:
       type: local

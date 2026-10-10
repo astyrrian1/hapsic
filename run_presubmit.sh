@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # ==========================================
 # HAPSIC LOCAL PRESUBMIT VALIDATION
@@ -12,23 +12,27 @@ set -e
 #     bash run_presubmit.sh --live   # Offline + live MQTT tests
 #
 # Prerequisites:
-#     python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
+#     Follow SETUP.md to install .venv and .venv-firmware and the pre-push hook.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 VENV_DIR="$SCRIPT_DIR/.venv"
 
-if [[ -z "$VIRTUAL_ENV" ]]; then
-  if [[ -f "$VENV_DIR/bin/activate" ]]; then
-    source "$VENV_DIR/bin/activate"
-  else
-    echo "❌ No virtualenv found at $VENV_DIR"
-    echo "   Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt"
-    exit 1
-  fi
+if [[ ! -f "$VENV_DIR/bin/activate" ]]; then
+  echo "Missing test environment; follow SETUP.md to install both toolchains."
+  exit 1
+fi
+source "$VENV_DIR/bin/activate"
+
+export PATH="$SCRIPT_DIR/scripts:$PATH"
+
+if [[ "$(git config --get core.hooksPath || true)" != ".githooks" ]]; then
+  echo "Install the required pre-push gate: git config core.hooksPath .githooks"
+  exit 1
 fi
 
 LIVE_MODE=false
-if [[ "$1" == "--live" ]]; then
+if [[ "${1:-}" == "--live" ]]; then
   LIVE_MODE=true
 fi
 
@@ -48,16 +52,19 @@ else
 fi
 
 # 2. Lint: C++ (clang-format)
-CLANG_FMT="/opt/homebrew/opt/llvm/bin/clang-format"
+CLANG_FMT="$(command -v clang-format || true)"
 echo ""
 echo "=== 2. C++ Format Check (clang-format) ==="
 if [[ -x "$CLANG_FMT" ]]; then
   $CLANG_FMT --dry-run --Werror components/hapsic/*.cpp components/hapsic/*.h
   echo "✓ C++ formatting clean."
 else
-  echo "⚠ clang-format not found. Install: brew install llvm"
+  echo "⚠ clang-format not found. Install requirements-dev.txt"
   exit 1
 fi
+
+echo "=== Python Regression Suite (pytest) ==="
+python3 -m pytest -q
 
 # 3. ESPHome YAML validation
 echo ""

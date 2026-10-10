@@ -2,13 +2,14 @@
 # Install: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
 
 # Testing
-pytest>=8.0
+pytest==9.0.3
 
 # Linting
-ruff>=0.4
+ruff==0.15.13
+clang-format==22.1.2
 
 # Live MQTT tests (optional — only needed for --live mode)
-paho-mqtt>=2.0
+paho-mqtt==2.1.0
 
 # YAML parsing (scenario builder)
-pyyaml>=6.0
+pyyaml==6.0.3
