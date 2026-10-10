@@ -2,16 +2,30 @@ name: HAPSIC CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: hapsic-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python-tests:
-    runs-on: ubuntu-24.04
+    env:
+      ESPHOME_DEFAULT_COMPILE_PROCESS_LIMIT: "1"
+      PLATFORMIO_RUN_JOBS: "1"
+    # Fork contributions run the same complete gate on hosted Linux.
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && '["ubuntu-24.04"]' || '["self-hosted", "Linux", "X64", "halo-ci", "hapsic"]') }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: |
@@ -37,12 +51,27 @@ jobs:
           pathlib.Path("secrets.yaml").write_text(yaml.safe_dump(values))
           PY
       - name: Complete offline presubmit
-        run: bash run_presubmit.sh
+        run: |
+          set -o pipefail
+          bash run_presubmit.sh 2>&1 | tee presubmit.log
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: presubmit-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          path: |
+            presubmit.log
+            python_scenarios.txt
+            python_sim_output.txt
+            cpp_scenarios.txt
 
   # Preserve the existing required check name; the dependency runs actual
   # production, desk, and native builds, not YAML-only syntax checks.
   esphome-validation:
     needs: python-tests
-    runs-on: ubuntu-24.04
+    # Fork contributions run the same complete gate on hosted Linux.
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && '["ubuntu-24.04"]' || '["self-hosted", "Linux", "X64", "halo-ci", "hapsic"]') }}
+    timeout-minutes: 60
     steps:
       - run: echo "Firmware compilation passed in the shared presubmit gate."

@@ -59,7 +59,7 @@
         {
           "id": "6c",
           "name": "Native configurable gain validation",
-          "status": "complete; local commit follows this execution record"
+          "status": "complete"
         }
       ]
     },
@@ -124,7 +124,8 @@
     "4": "7cc7084",
     "5a": "93c4ad1",
     "6a": "00850c8",
-    "6b": "76ff38a"
+    "6b": "76ff38a",
+    "6c": "a1f1a21"
   },
   "evidence": {
     "1": "15 initial failing meta-tests plus 3 review failures; 92 pytest tests and full presubmit passed; review resolved import order and silent FSM failures.",
@@ -186,7 +187,7 @@
   "release_prerequisites": [
     "Independent host-loss shutdown remains unverified.",
     "Qualify actual sensor report cadence, actuator transport/readback, and durable storage.",
-    "Desk fault injection with steam disconnected before production; no deployment, flashing, or release authorized in this implementation."
+    "Desk fault injection with steam disconnected before production; deployment, flashing, and live restarts remain outside this authorization."
   ],
   "open_decisions": [],
   "transport_findings": {
@@ -229,5 +230,34 @@
     "7": "Two actual-source RED cases: raw Shelly RH88 concealed by cleansed RH35 at startup and during active output. Drafts in /tmp/hapsic-input-domain-regressions; fix pending.",
     "8": "Eight actual-source RED cases plus four preservation cases in /tmp/hapsic-nameplate-regressions: trained curves/CHI alter control at fixed nameplate; changes to validated nameplate must still affect control. Fix pending."
   },
-  "current_release_status": "Not deployable: 5b and chunks7-16 remain unfinished; transport, source freshness, durable recovery and independent host-loss shutdown are not qualified."
+  "current_release_status": "Not deployable: 5b and chunks7-16 remain unfinished; transport, source freshness, durable recovery and independent host-loss shutdown are not qualified.",
+  "post_merge_release": {
+    "authorization": "User explicitly requested publication of a new HAPSIC release with release notes once this safety remediation is merged.",
+    "repository": "astyrrian1/hapsic",
+    "source_branch": "codex/safety-remediation",
+    "status": "pending completion, merge, and release prerequisites",
+    "workflow": ".agents/workflows/hacs-release.md",
+    "requirements": [
+      "Complete the approved remediation and satisfy existing safety qualification gates.",
+      "Verify this work is merged into main and required presubmit and GitHub CI pass for the release commit.",
+      "Choose semver based on final compatibility changes; update version and CHANGELOG; publish an annotated tag and GitHub Release with user-facing release notes.",
+      "Check existing tags and releases to avoid duplicate publication or moving tags."
+    ],
+    "scope": "Publication after merge is authorized; merging, deployment, flashing, and live restarts are not authorized by this release request."
+  },
+  "ci_runner": {
+    "authorization": "User changed runner preference to Halo: Just use Halo for runners.",
+    "runner": "proxmox-hapsic-ci-110",
+    "labels": [
+      "self-hosted",
+      "Linux",
+      "X64",
+      "halo-ci",
+      "hapsic"
+    ],
+    "registration": "Dedicated HAPSIC registration on the existing Halo CI VM; online and isolated as hapsic-ci.",
+    "scope": "Full offline presubmit in CI, including discovered regressions, sanitizer adapters, scenarios, standalone suites, and clean production/desk builds. Live hardware qualification remains separate.",
+    "validation": "363 local pytest tests pass; full local presubmit passes including clean production/desk builds (/tmp/hapsic-dockge-presubmit.log). First GitHub execution on Halo pending.",
+    "review": "Two bounded adversarial review cycles; no actionable findings. Verified loopback DNS and dedicated writable tool cache in the running service."
+  }
 }

@@ -85,3 +85,44 @@ def test_required_firmware_builds_discard_previous_binaries():
         commands = (ROOT / filename).read_text()
         assert f"esphome clean {config}" in commands
         assert commands.index(f"esphome clean {config}") < commands.index(f"esphome compile {config}")
+
+
+def test_ci_routes_trusted_work_to_halo_and_forks_to_hosted_linux():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    for job in workflow['jobs'].values():
+        routing = job['runs-on']
+        assert 'halo-ci' in routing
+        assert 'self-hosted' in routing
+        assert 'dockge' not in routing.lower()
+        assert 'github.event.pull_request.head.repo.full_name' in routing
+        assert 'ubuntu-24.04' in routing
+    assert workflow['permissions'] == {'contents': 'read'}
+
+
+def test_ci_covers_work_branches_and_retains_failure_evidence():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    triggers = workflow.get('on', workflow.get(True))
+    assert 'codex/**' in triggers['push']['branches']
+    job = workflow['jobs']['python-tests']
+    assert job['timeout-minutes'] >= 30
+    assert any(step.get('uses', '').startswith('actions/upload-artifact@')
+               and step.get('if') == 'always()' for step in job['steps'])
+    assert any('pipefail' in step.get('run', '') and 'tee' in step.get('run', '')
+               and 'bash run_presubmit.sh' in step.get('run', '') for step in job['steps'])
+    checkout = next(step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@'))
+    assert checkout['with']['persist-credentials'] is False
+
+
+def test_halo_runner_provisioning_is_scoped_and_resource_bounded():
+    bootstrap = (ROOT / "provisioning/ci-runner/bootstrap.sh").read_text()
+    hardening = (ROOT / "provisioning/ci-runner/hardening.conf").read_text()
+    assert 'hapsic-ci' in bootstrap and '/opt/hapsic-ci-runner' in bootstrap
+    assert 'sha256sum --check' in bootstrap
+    assert 'Existing runner preserved' in bootstrap
+    for requirement in ('User=hapsic-ci', 'MemoryMax=2G', 'CPUQuota=150%',
+                        'NoNewPrivileges=true', 'ProtectSystem=strict',
+                        'PrivateDevices=true', 'MemorySwapMax=0'):
+        assert requirement in hardening
+    assert '/opt/halo-ci-runner' not in bootstrap + hardening
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    assert str(workflow['jobs']['python-tests']['env']['ESPHOME_DEFAULT_COMPILE_PROCESS_LIMIT']) == '1'

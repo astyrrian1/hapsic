@@ -93,3 +93,10 @@ M5GFX 0.2.19 is pinned to its official Git commit in component code generation;
 do not add duplicate library versions in the device YAML files.
 Presence-only simulation checks are smoke coverage, not proof of mathematical
 or physical safety equivalence.
+
+## 6. GitHub CI runner
+
+The full offline presubmit also runs on the existing Halo CI VM with a dedicated
+HAPSIC registration. See [runner setup](provisioning/ci-runner/README.md) for
+provisioning, isolation, labels, and recovery. CI runs for work branches and PRs,
+retains failure logs, and never deploys firmware or accesses live steam controls.
