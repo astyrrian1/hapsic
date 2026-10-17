@@ -85,6 +85,11 @@ echo "=== 14. System Tests — Telemetry Integrity ==="
 python3 test_telemetry_integrity.py
 echo "✓ Telemetry reporting layer validated."
 
+echo "=== 15. Independent diagnostics, native serialized replay, and consumer contracts ==="
+python3 -m pytest -q
+python3 verify_diagnostic_control.py
+python3 verify_legacy_control.py
+
 echo "========================================="
 echo "✅ ALL CI PIPELINE TESTS COMPLETED AND PASSED."
 echo "========================================="

@@ -19,10 +19,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install ruff paho-mqtt pyyaml
+        run: pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
-        run: ruff check hapsic.py scenario_builder.py scenario_tester.py run_compare.py --select E,W --ignore E402,E501,E701,W291,W292,W293
+        run: ruff check apps/hapsic-controller/hapsic_controller.py scenario_builder.py scenario_tester.py run_compare.py --select E,W --ignore E402,E501,E701,W291,W292,W293
 
       - name: Unit Tests - Psychrometrics
         run: python3 test_psychrometrics.py
@@ -38,6 +38,9 @@ jobs:
 
       - name: Integration Tests - FSM Transitions
         run: python3 test_fsm_transitions.py
+
+      - name: Diagnostic contracts and sanitized native replay
+        run: python3 -m pytest -q
 
       - name: Generate Scenario Data
         run: python3 scenario_builder.py
@@ -81,3 +84,27 @@ jobs:
       - name: Validate YAML Syntax - Desk Config
         run: python3 -c "import yaml; L=type('L',(yaml.SafeLoader,),{}); [L.add_constructor(t,lambda l,n:l.construct_scalar(n)) for t in ['!secret','!lambda','!include','!extend','!remove']]; yaml.load(open('stamplc_desk.yaml'),Loader=L); print('stamplc_desk.yaml OK')"
 
+
+  native-control-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native build dependencies
+        # This job only needs ESPHome and the stdlib driver. ESPHome pins
+        # Paho 1.x; the separate Python-test job exercises the Paho 2.x tools.
+        run: pip install esphome==2026.1.5
+      - name: Build the actual host controller
+        run: |
+          python3 scenario_builder.py
+          bash run_cpp.sh
+      - name: Compare control outputs with diagnostic fault injection
+        run: python3 verify_diagnostic_control.py
+      - name: Legacy control math, persistence, telemetry and structured replay
+        run: |
+          python3 verify_legacy_control.py
+          python3 test_offline_parity.py

@@ -93,6 +93,14 @@ struct HapsicPersist {
   uint32_t magic;         // 0xABCD1235 = valid data (bumped from 1234 for migration)
 };
 
+struct HapsicLearningV2 {
+  uint32_t version = 2;
+  float chi_ema = 1;
+  float target_dp_c = 4.4f;
+  float curve[4] = {};
+  uint32_t counts[4] = {};
+};
+
 struct SensorLossCache {
   float value = std::numeric_limits<float>::quiet_NaN();
   uint32_t last_valid_ms = 0;
@@ -181,6 +189,10 @@ class HapsicController : public PollingComponent {
 
   // Max capacity (ESPHome sensor component)
   void set_max_capacity_sensor(sensor::Sensor *s) { max_capacity_sensor_ = s; }
+
+  // Read-only observation seam. Diagnostics never receive an actuator handle.
+  float diagnostic_commanded_voltage() const { return steam_voltage_; }
+  bool diagnostic_faulted() const { return fsm_state_ == FAULT; }
 
   // Manual reset (ESPHome button component)
   void set_manual_reset_button(button::Button *b) { manual_reset_button_ = b; }
@@ -409,6 +421,7 @@ class HapsicController : public PollingComponent {
   // Diagnostics
   float chi_ema_ = 1.0f;
   float chi_instant_ = 0.0f;
+  bool chi_eligible_ = false;
   std::string boil_status_ = "COLD";
   float steam_mass_kg_hr_ = 0.0f;
   float net_flux_ = 0.0f;
@@ -437,7 +450,7 @@ class HapsicController : public PollingComponent {
   static constexpr int BOILER_CURVE_MIN_SAMPLES = 50;
   static constexpr float BOILER_CURVE_ALPHA = 0.002f;
   float boiler_curve_[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-  int boiler_curve_counts_[4] = {0, 0, 0, 0};
+  uint32_t boiler_curve_counts_[4] = {0, 0, 0, 0};
 
   // NVS persistence
   ESPPreferenceObject pref_;
@@ -555,6 +568,9 @@ class HapsicController : public PollingComponent {
   void execute_loop_b();
   void write_output();
   void run_diagnostics();
+  void restore_learning();
+  void checkpoint_learning();
+  std::string legacy_telemetry_json();
   void update_economy_advisory();
   void publish_telemetry();
   void update_display();

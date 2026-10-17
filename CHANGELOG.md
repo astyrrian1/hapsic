@@ -5,6 +5,44 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.8.0] — 2026-10-17
+
+### Legacy control and telemetry repairs
+
+- Correct C++ g/kg/grains and kg/lb boundaries throughout legacy delivery, losses,
+  CHI, learned capacity and feed-forward; publish actual instantaneous CHI.
+- Initialize new bins with a 50-tick mean, persist real counts in versioned records,
+  and protect/verify the original Python helper backup before migration.
+- Publish current eligibility and unavailable measurements consistently across MQTT,
+  native sensors and HA; reuse the site's existing UI learning helper.
+- Enforce the existing actuator envelope after slew: actual recorded-input replay
+  exposed pre-existing over/undershoot that the repaired model encountered more often.
+- Replace weak offline parity with deterministic actual-controller replay, including
+  private real-history verification, counted restart and real adapter fault isolation.
+- Keep Mission Control's learned-curve card compatible with both old arrays and
+  the counted versioned record, show actual training counts, and correct the voltage
+  bands and lb/hr label.
+
+
+### Added
+- Independent diagnostic observer and AppDaemon scheduling/persistence, with equivalent native C++ math and state traces.
+- Explicit raw source contracts, warmup/stability qualification, four-period baseline validation, frozen reference generations, conservative uncertainty and integrated performance windows.
+- Non-retained schema-1 MQTT diagnostics, guarded durable calibration commands, alert episode persistence and new HA sensors/dashboard/notification consumers.
+- Opt-in desk/production diagnostic firmware variants with isolated NVS storage; flashing remains separate.
+
+### Changed
+- Label legacy CHI, net flux, feasibility and nameplate delivery as control-model estimates; preserve signed output and percentages above 100.
+- Resolve the unavailable M5GFX 0.2.19 registry pin to the exact upstream 0.2.19 Git commit, without upgrading its version.
+
+### Commissioning
+- Sensor reporting/scaling/flow contracts, held-out baseline, owner-confirmed reference, timing/rollback and >=24 h/three natural cycles remain required. Defaults do not manufacture a calibrated result. See docs/delivery-diagnostics.md.
+
+### Deployment Notes
+After installing this release through HACS:
+1. Restart AppDaemon to load the updated controller and learning migration.
+2. Update the Home Assistant HAPSIC package and Mission Control dashboard from this release so the new counted curve record renders correctly.
+3. Firmware compilation and flashing remain separate; HACS does not update installed ESP32 firmware.
+
 ## [v2.7.4] — 2026-05-22
 
 ### Added

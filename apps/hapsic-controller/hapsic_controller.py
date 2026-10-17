@@ -1,9 +1,955 @@
 import json
 import math
+import os
+import queue
+import tempfile
 import time
 import traceback
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from datetime import datetime
+from hashlib import sha256
+from itertools import product
+from pathlib import Path
+from uuid import uuid4
 
 import appdaemon.plugins.hass.hassapi as hass
+
+
+class DeliveryObserver:
+    """Diagnostic-only SI observer. Never receives a controller or actuator object.
+
+    Saturation pressure and dry-air specific volume follow ASHRAE 2017,
+    independently checked against PsychroLib 2.5.0:
+    https://psychrometrics.github.io/psychrolib/api_docs.html#psychrolib.GetMoistAirVolume
+    """
+
+    AIR_KEYS = ("upstream_t", "upstream_rh", "downstream_t", "downstream_rh", "flow")
+    KEYS = AIR_KEYS + ("pressure", "command")
+    DEFAULTS = dict(algorithm_version="delivery-si-1", airflow_basis="unverified", reporting_verified=False,
+                    max_age=120.0, pressure_max_age=900.0, max_skew=30.0,
+                    minimum_reports=3, stable_seconds=300.0, warmup_seconds=900.0,
+                    off_seconds=900.0, baseline_seconds=600.0, minimum_flow=50.0,
+                    command_range=0.2, flow_range=0.05, temperature_slope=0.2,
+                    moisture_slope=0.0001, warning=60.0, recovery=65.0,
+                    max_evidence=10080, max_window=512, site_pressure_pa=88600.0)
+
+    def __init__(self, config=None):
+        self.config = {**self.DEFAULTS, **deepcopy(config or {})}
+        for key in ("max_age", "pressure_max_age", "max_skew", "stable_seconds", "warmup_seconds",
+                    "off_seconds", "baseline_seconds", "minimum_flow", "command_range", "flow_range",
+                    "temperature_slope", "moisture_slope", "max_evidence", "max_window", "site_pressure_pa"):
+            if not self._finite(self.config[key]) or self.config[key] <= 0:
+                raise ValueError(f"Invalid diagnostic setting: {key}")
+        if not 0 < self.config["warning"] < self.config["recovery"]:
+            raise ValueError("Diagnostic recovery threshold must exceed warning")
+        self.config_id = sha256(json.dumps(self.config, sort_keys=True, allow_nan=False).encode()).hexdigest()[:16]
+        self.generation = self.config_id
+        self.baseline = None
+        self.reference = None
+        self.candidate = None
+        self.revision = 0
+        self.archives = deque(maxlen=4)
+        self.evidence = deque()
+        self.window = deque()
+        self.delivery_window = deque()
+        self.previous = None
+        self.last_mono = None
+        self.last_utc = None
+        self.clock_valid = False
+        self.clock_anchor = None
+        self.clock_recovery = None
+        self.zero_since = None
+        self.demand_since = None
+        self.cycle = 0
+        self.off_period = 0
+        self.off_period_open = False
+        self.quarantined_evidence = []
+        self.last_zero_end = None
+        self.qualified_seconds = 0.0
+        self.reason = "STARTUP"
+        self.last_valid = {}
+        self.alert_episode = 0
+        self.alert_active = False
+        self.alert_snapshot = None
+        self.exclusions = {}
+        self.cursors = {}
+        self.source_identity = None
+        self.last_measurement = self._missing("STARTUP")
+
+    @staticmethod
+    def _finite(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+    @staticmethod
+    def _missing(reason):
+        return dict(status="unavailable", reason=reason, eligible=False, raw_kg_h=None,
+                    corrected_kg_h=None, lower_kg_h=None, upper_kg_h=None, uncertainty_kg_h=None)
+
+    @staticmethod
+    def _convert(value, unit, key):
+        if key.endswith("_t"):
+            if unit in ("°C", "C"): return value, 1.0
+            if unit in ("°F", "F"): return (value - 32.0) / 1.8, 1 / 1.8
+        elif key.endswith("_rh") and unit == "%": return value, 1.0
+        elif key == "flow":
+            if unit in ("m³/h", "m3/h"): return value, 1.0
+            if unit == "cfm": return value * 1.69901079552, 1.69901079552
+        elif key == "pressure":
+            factors = {"Pa": 1.0, "kPa": 1000.0, "hPa": 100.0, "mbar": 100.0, "inHg": 3386.389}
+            if unit in factors: return value * factors[unit], factors[unit]
+        elif key == "command" and unit == "V": return value, 1.0
+        raise ValueError(f"Unsupported diagnostic unit: {key}")
+
+    @staticmethod
+    def humidity_ratio(temp, rh, pressure):
+        if not -80 <= temp <= 100 or not 0 <= rh <= 100 or not 20000 <= pressure <= 120000:
+            raise ValueError("Psychrometric input domain")
+        kelvin = temp + 273.15
+        if temp <= 0.01:
+            log_p = (-5674.5359 / kelvin + 6.3925247 - 0.009677843 * kelvin
+                     + 0.00000062215701 * kelvin ** 2 + 0.0000000020747825 * kelvin ** 3
+                     - 0.0000000000009484024 * kelvin ** 4 + 4.1635019 * math.log(kelvin))
+        else:
+            log_p = (-5800.2206 / kelvin + 1.3914993 - 0.048640239 * kelvin
+                     + 0.000041764768 * kelvin ** 2 - 0.000000014452093 * kelvin ** 3
+                     + 6.5459673 * math.log(kelvin))
+        vapor = math.exp(log_p) * rh / 100.0
+        if vapor >= pressure: raise ValueError("Vapor pressure exceeds absolute pressure")
+        return 0.621945 * vapor / (pressure - vapor)
+
+    @classmethod
+    def _rates(cls, values, offset):
+        ut, ur, dt, dr, flow, pressure = values
+        upstream = cls.humidity_ratio(ut, ur, pressure)
+        downstream = cls.humidity_ratio(dt, dr, pressure)
+        volume = 287.042 * (ut + 273.15) * (1 + 1.607858 * upstream) / pressure
+        mass = flow / volume
+        return mass * (downstream - upstream), mass * (downstream - upstream - offset), downstream - upstream
+
+    def measure(self, snapshot, now):
+        try:
+            values, errors, times, ids = [], [], [], []
+            verified = self.config["reporting_verified"] is True and self.config["airflow_basis"] == "actual_upstream"
+            pressure_fallback = "pressure" not in snapshot
+            for key in self.KEYS:
+                if key == "pressure" and pressure_fallback:
+                    values.append(self.config["site_pressure_pa"])
+                    errors.append(None)
+                    verified = False
+                    continue
+                item = snapshot[key]
+                if not self._finite(item["value"]) or not self._finite(item["reported_at"]):
+                    raise ValueError("Nonfinite source")
+                age = now - item["reported_at"]
+                max_age = self.config["pressure_max_age"] if key == "pressure" else self.config["max_age"]
+                if not 0 <= age <= (15 if key == "command" else max_age):
+                    raise ValueError("Stale or future source")
+                value, factor = self._convert(item["value"], item["unit"], key)
+                if key == "command":
+                    if (not 0 <= value <= 10 or item.get("fault", False) or item.get("uncertain", False)
+                            or item.get("verified") is not True or not item.get("source")):
+                        raise ValueError("Command unavailable or faulted")
+                    continue
+                values.append(value)
+                accuracy = item.get("accuracy")
+                errors.append(abs(factor) * accuracy if self._finite(accuracy) and accuracy >= 0 else None)
+                verified = verified and item.get("verified") is True and bool(item.get("source"))
+                if key in self.AIR_KEYS:
+                    times.append(item["reported_at"])
+                    ids.append(str(item["report_id"]))
+            if max(times) - min(times) > self.config["max_skew"]:
+                raise ValueError("Source timestamp skew")
+            if values[4] < 0: raise ValueError("Negative flow")
+            offset = self.baseline["offset"] if self.baseline else 0.0
+            raw, corrected, delta = self._rates(values, offset)
+            lower = upper = uncertainty = None
+            if all(error is not None for error in errors):
+                # Enclose each w and specific-volume term independently. This
+                # preserves correlated biases conservatively, without 1/sqrt(N).
+                bounds = [(v - e, v + e) for v, e in zip(values, errors)]
+                wu, wd, volumes = [], [], []
+                for temp, rh, pressure in product(bounds[0], bounds[1], bounds[5]):
+                    w = self.humidity_ratio(temp, min(100, max(0, rh)), pressure)
+                    wu.append(w)
+                    volumes.append(287.042 * (temp + 273.15) * (1 + 1.607858 * w) / pressure)
+                for temp, rh, pressure in product(bounds[2], bounds[3], bounds[5]):
+                    wd.append(self.humidity_ratio(temp, min(100, max(0, rh)), pressure))
+                offset_error = self.baseline.get("residual", 0.0) if self.baseline else 0.0
+                deltas = (min(wd) - max(wu) - offset - offset_error,
+                          max(wd) - min(wu) - offset + offset_error)
+                masses = (max(0, bounds[4][0]) / max(volumes), bounds[4][1] / min(volumes))
+                rates = [m * d for m, d in product(masses, deltas)]
+                lower, upper = min(rates), max(rates)
+                uncertainty = max(corrected - lower, upper - corrected)
+            reason = "OK" if verified else "UNVERIFIED_PROVENANCE_OR_AIRFLOW"
+            if pressure_fallback: reason = "SITE_PRESSURE_ESTIMATE"
+            if self.baseline and not self.baseline.get("uncertainty_known", False):
+                lower = upper = uncertainty = None
+            if self.baseline and snapshot["command"]["value"] > 0 and upper is not None and upper < 0:
+                reason, verified = "MEASUREMENT_MISMATCH", False
+            if reason == "OK" and self.baseline and not self._in_envelope(
+                    dict(upstream_t=values[0], upstream_rh=values[1], flow=values[4])):
+                reason = "OUTSIDE_BASELINE_ENVELOPE"
+            return dict(status="valid" if verified and uncertainty is not None and reason == "OK" else "provisional",
+                        reason=reason,
+                        eligible=bool(verified), raw_kg_h=raw, corrected_kg_h=corrected,
+                        lower_kg_h=lower, upper_kg_h=upper, uncertainty_kg_h=uncertainty,
+                        delta_uncertainty=(uncertainty / (values[4] /
+                                           (287.042 * (values[0] + 273.15) *
+                                            (1 + 1.607858 * self.humidity_ratio(values[0], values[1], values[5])) /
+                                            values[5]))) if uncertainty is not None and values[4] > 0 else None,
+                        delta_w=delta, upstream_t=values[0], upstream_rh=values[1], flow=values[4],
+                        report_ids=ids, source_times=times, commanded_voltage=snapshot["command"]["value"])
+        except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+            return self._missing("INVALID_OR_MISSING_SOURCE")
+
+    @staticmethod
+    def _slope(rows, key):
+        mean_t = sum(row["mono"] for row in rows) / len(rows)
+        mean_v = sum(row[key] for row in rows) / len(rows)
+        denominator = sum((row["mono"] - mean_t) ** 2 for row in rows)
+        return (60 * sum((row["mono"] - mean_t) * (row[key] - mean_v) for row in rows) / denominator
+                if denominator else 0.0)
+
+    def _stable(self, rows, seconds):
+        if not rows or rows[-1]["mono"] - rows[0]["mono"] < seconds - 1e-6: return False
+        for index in range(5):
+            if len({r["report_ids"][index] for r in rows}) < self.config["minimum_reports"]: return False
+        volts = [row["commanded_voltage"] for row in rows]
+        flow = [row["flow"] for row in rows]
+        return (max(volts) - min(volts) <= self.config["command_range"] + 1e-9
+                and max(flow) - min(flow) <= self.config["flow_range"] * sum(flow) / len(flow) + 1e-9
+                and abs(self._slope(rows, "upstream_t")) <= self.config["temperature_slope"] + 1e-9
+                and abs(self._slope(rows, "delta_w")) <= self.config["moisture_slope"] + 1e-12)
+
+    def interrupt(self, reason):
+        self.previous = None
+        self.window.clear()
+        self.delivery_window.clear()
+        self.qualified_seconds = 0.0
+        self.reason = reason
+        self.exclusions[reason] = self.exclusions.get(reason, 0) + 1
+
+    def _quarantine(self):
+        # Preserve unscored mass/time summaries by cycle, not a second full ring.
+        # Ambiguous UTC is never used again for retention or scoring.
+        grouped = {}
+        for block in self.evidence:
+            cycle = block["cycle"]
+            if cycle not in grouped:
+                grouped[cycle] = deepcopy(block)
+                continue
+            merged = grouped[cycle]
+            total = merged["seconds"] + block["seconds"]
+            for key in ("measured", "lower", "upper", "reference", "reference_lower", "reference_upper"):
+                merged[key] = ((merged[key] * merged["seconds"] + block[key] * block["seconds"]) / total
+                               if merged[key] is not None and block[key] is not None else None)
+            merged.update(end=block["end"], seconds=total)
+        if grouped: self.quarantined_evidence = list(grouped.values())
+
+    def _clock(self, mono, utc, synced):
+        if not self._finite(mono) or (self.last_mono is not None and mono <= self.last_mono): return False
+        step = (self.last_mono is not None and self._finite(utc) and self._finite(self.last_utc)
+                and abs((utc - self.last_utc) - (mono - self.last_mono)) > 5)
+        self.last_mono = mono
+        if not synced or not self._finite(utc):
+            self.clock_valid = False
+            self.clock_recovery = mono
+        elif self.clock_anchor is None:
+            self.clock_anchor = utc - mono
+            self.clock_valid = True
+        elif abs(utc - mono - self.clock_anchor) > 5 or step:
+            self.clock_valid = False
+            self.clock_anchor = utc - mono
+            self.clock_recovery = mono
+            self._quarantine()
+            self.evidence.clear()
+        elif self.clock_recovery is not None and mono - self.clock_recovery >= 30:
+            self.clock_valid = True
+            self.clock_recovery = None
+        self.last_utc = utc
+        if self.clock_valid and self.evidence and self.evidence[-1]["end"] > utc + 5:
+            self._quarantine()
+            self.evidence.clear()
+        return self.clock_valid
+
+    def observe(self, snapshot, mono, utc, *, synced=False):
+        if not self._clock(mono, utc, synced):
+            self.zero_since = self.demand_since = None
+            self.interrupt("CLOCK_UNSYNCHRONIZED")
+            self.last_measurement = self._missing("CLOCK_UNSYNCHRONIZED")
+            return self.telemetry(utc)
+        result = self.measure(snapshot, utc)
+        self.last_measurement = result
+        if not result["eligible"] or result.get("flow", 0) < self.config["minimum_flow"]:
+            self.zero_since = None
+            self.demand_since = None
+            self.interrupt(result["reason"] if not result["eligible"] else "LOW_FLOW")
+            return self.telemetry(utc)
+        identity = {key: [snapshot[key].get(field) for field in ("source", "unit", "accuracy")]
+                    for key in self.KEYS if key in snapshot}
+        if self.source_identity is not None and identity != self.source_identity:
+            self.command("baseline_reset")
+            self.source_identity = identity
+            self.interrupt("SOURCE_IDENTITY_CHANGED")
+            self.last_measurement = self._missing("SOURCE_IDENTITY_CHANGED")
+            return self.telemetry(utc)
+        self.source_identity = identity
+        row = {**result, "mono": mono, "utc": utc}
+        voltage = row["commanded_voltage"]
+        if self.previous and self.previous["commanded_voltage"] != voltage:
+            if (self.previous["commanded_voltage"] == 0) != (voltage == 0):
+                self.interrupt("COMMAND_INTERRUPTED")
+        if self.previous and row["report_ids"] == self.previous["report_ids"]:
+            return self.telemetry(utc)
+        if self.previous and (mono - self.previous["mono"] > self.config["max_age"]
+                              or utc <= self.previous["utc"]
+                              or any(a < b for a, b in zip(row["source_times"], self.previous["source_times"]))):
+            self.interrupt("OBSERVATION_GAP")
+            self.zero_since = None
+            self.demand_since = None
+        if voltage == 0:
+            if self.zero_since is None:
+                self.zero_since = mono
+                if not self.off_period_open: self.off_period += 1
+                self.off_period_open = True
+            self.last_zero_end = mono
+            self.demand_since = None
+        else:
+            self.off_period_open = False
+            if self.demand_since is None:
+                off = mono - self.zero_since if self.zero_since is not None else None
+                if off is not None and off >= self.config["off_seconds"]: self.cycle += 1
+                self.demand_since = mono
+                self.warmup_until = mono + self.config["warmup_seconds"] if off is None or off >= 60 else mono
+            self.zero_since = None
+        if voltage > 0 and mono < self.warmup_until:
+            self.interrupt("WARMUP")
+            self.previous = row
+            return self.telemetry(utc)
+        if self.previous and (self.previous["commanded_voltage"] == 0) != (voltage == 0):
+            self.interrupt("COMMAND_INTERRUPTED")
+        self.window.append(row)
+        duration = self.config["baseline_seconds"] if voltage == 0 else self.config["stable_seconds"]
+        while len(self.window) > 1 and self.window[1]["mono"] <= mono - duration:
+            self.window.popleft()
+        if len(self.window) > self.config["max_window"]:
+            self.interrupt("CAPACITY_EXHAUSTED")
+        stable = self._stable(self.window, duration)
+        prior = self.previous
+        previously_qualified = self.reason == "QUALIFIED"
+        self.reason = "QUALIFIED" if stable else "STABILIZING"
+        if voltage == 0:
+            self.delivery_window.clear()
+            self.qualified_seconds = 0.0
+            if stable and mono - self.zero_since >= self.config["off_seconds"] + duration:
+                self._collect_baseline(row)
+        elif stable and previously_qualified and prior:
+            seconds = mono - prior["mono"]
+            self.qualified_seconds += seconds
+            if self._in_envelope(row) and self._in_envelope(prior):
+                self._collect_reference(prior, seconds)
+                matched = self._reference_rate(prior["commanded_voltage"], prior["flow"])
+                if matched:
+                    block = dict(start=prior["utc"], end=utc, seconds=seconds, cycle=self.cycle,
+                                 generation=self.generation, measured=prior["corrected_kg_h"],
+                                 lower=prior["lower_kg_h"], upper=prior["upper_kg_h"],
+                                 reference=matched["value"], reference_lower=matched["lower"],
+                                 reference_upper=matched["upper"])
+                    self.delivery_window.append(block)
+                    self._trim(self.delivery_window, 300)
+                    if voltage >= 9 and prior["commanded_voltage"] >= 9:
+                        self._append_evidence(block)
+                else:
+                    self.delivery_window.clear()
+            else:
+                self.delivery_window.clear()
+                self.exclusions["OUTSIDE_BASELINE_ENVELOPE"] = self.exclusions.get("OUTSIDE_BASELINE_ENVELOPE", 0) + 1
+        else:
+            self.delivery_window.clear()
+        self.previous = row
+        self.cursors = dict(zip(self.AIR_KEYS, row["report_ids"]))
+        return self.telemetry(utc)
+
+    def _in_envelope(self, row):
+        return bool(self.baseline) and all(
+            lo - 1e-9 <= row[key] <= hi + 1e-9 for key, (lo, hi) in self.baseline["envelope"].items())
+
+    def _collect_baseline(self, row):
+        candidate = self.candidate
+        if not candidate or candidate["kind"] != "baseline": return
+        if any(window["period"] == self.off_period for window in candidate["windows"]): return
+        if len(candidate["windows"]) >= 4: return
+        rows = list(self.window)
+        durations = [b["mono"] - a["mono"] for a, b in zip(rows, rows[1:])]
+        mean = sum(a["delta_w"] * dt for a, dt in zip(rows, durations)) / sum(durations)
+        window = dict(period=self.off_period, mean=mean, minimum=min(r["delta_w"] for r in rows),
+                      maximum=max(r["delta_w"] for r in rows),
+                      uncertainty_known=all(r["uncertainty_kg_h"] is not None for r in rows),
+                      error=max(r["delta_uncertainty"] or 0 for r in rows),
+                      envelope={key: [min(r[key] for r in rows), max(r[key] for r in rows)]
+                                for key in ("upstream_t", "upstream_rh", "flow")})
+        candidate["windows"].append(window)
+        if len(candidate["windows"]) >= 3:
+            training = candidate["windows"][:3]
+            candidate["offset"] = sorted(w["mean"] for w in training)[1]
+            candidate["residual"] = max(abs(w[k] - candidate["offset"]) for w in training
+                                        for k in ("minimum", "maximum"))
+            candidate["ready"] = (len(candidate["windows"]) == 4 and
+                                  abs(mean - candidate["offset"]) <= candidate["residual"] + window["error"] + 1e-12)
+
+    def command(self, action, revision=None, *, healthy=False):
+        if action in ("baseline_start", "reference_start"):
+            if action == "reference_start" and (not self.baseline or not healthy):
+                raise ValueError("Reference requires accepted baseline and owner-confirmed healthy operation")
+            self.revision += 1
+            self.candidate = dict(kind=action.split("_")[0], revision=self.revision, ready=False,
+                                  generation=self.generation, windows=[], bins={}, healthy=healthy)
+            self.interrupt("CALIBRATION_STARTED")
+        elif action == "cancel":
+            self.candidate = None
+        elif action in ("baseline_accept", "reference_accept"):
+            candidate = self.review()
+            if (type(revision) is not int or not candidate or candidate["kind"] != action.split("_")[0]
+                    or candidate["revision"] != revision or not candidate["ready"]
+                    or candidate["generation"] != self.generation):
+                raise ValueError("Candidate is incomplete, incompatible, or stale")
+            self._archive()
+            if action == "baseline_accept":
+                training = candidate["windows"][:3]
+                self.baseline = dict(offset=candidate["offset"], residual=candidate["residual"],
+                                     uncertainty_known=all(w["uncertainty_known"] for w in candidate["windows"]),
+                                     envelope={key: [min(w["envelope"][key][0] for w in training),
+                                                     max(w["envelope"][key][1] for w in training)]
+                                               for key in ("upstream_t", "upstream_rh", "flow")})
+                self.generation = sha256(json.dumps([self.config_id, self.revision, self.baseline],
+                                                    sort_keys=True).encode()).hexdigest()[:16]
+                self.reference = None
+            else:
+                self.reference = deepcopy(candidate)
+                self.reference["bins"] = {k: b for k, b in self.reference["bins"].items() if b["ready"]}
+            self.candidate = None
+            self.evidence.clear()
+            self.quarantined_evidence.clear()
+            self.alert_active = False
+            self.alert_snapshot = None
+            self.last_valid.clear()
+            self.interrupt("CALIBRATION_ACCEPTED")
+        elif action in ("baseline_reset", "reference_reset"):
+            self._archive()
+            self.revision += 1
+            if action == "baseline_reset":
+                self.baseline = None
+                self.generation = sha256(f"{self.config_id}:{self.revision}".encode()).hexdigest()[:16]
+            self.reference = self.candidate = None
+            self.evidence.clear()
+            self.quarantined_evidence.clear()
+            self.alert_active = False
+            self.alert_snapshot = None
+            self.last_valid.clear()
+            self.interrupt("CALIBRATION_RESET")
+        else:
+            raise ValueError("Unknown diagnostic action")
+        return self.review()
+
+    def _archive(self):
+        if self.baseline or self.reference:
+            self.archives.append(deepcopy(dict(generation=self.generation, baseline=self.baseline,
+                                               reference=self.reference)))
+
+    def _collect_reference(self, row, seconds):
+        candidate = self.candidate
+        if not candidate or candidate["kind"] != "reference": return
+        index = str(int(math.floor(row["commanded_voltage"] * 2 + 0.5)))
+        bins = candidate["bins"]
+        bucket = bins.setdefault(index, dict(seconds=0.0, cycles=[], voltage=0.0, flow=0.0, output=0.0,
+                                            minimum_voltage=row["commanded_voltage"],
+                                            maximum_voltage=row["commanded_voltage"],
+                                            minimum_flow=row["flow"], maximum_flow=row["flow"],
+                                            lower=None, upper=None, uncertainty_known=True, minimum_output=1e30,
+                                            maximum_output=-1e30))
+        if bucket["seconds"] >= 1800 and len(bucket["cycles"]) >= 3: return
+        vmin, vmax = min(bucket["minimum_voltage"], row["commanded_voltage"]), max(
+            bucket["maximum_voltage"], row["commanded_voltage"])
+        fmin, fmax = min(bucket["minimum_flow"], row["flow"]), max(bucket["maximum_flow"], row["flow"])
+        mean_flow = (bucket["flow"] + row["flow"] * seconds) / (bucket["seconds"] + seconds)
+        if vmax - vmin > 0.2 + 1e-9 or fmax - fmin > 0.1 * mean_flow + 1e-9: return
+        bucket.update(minimum_voltage=vmin, maximum_voltage=vmax, minimum_flow=fmin, maximum_flow=fmax)
+        bucket["seconds"] += seconds
+        if self.cycle not in bucket["cycles"]: bucket["cycles"].append(self.cycle)
+        for key, source in (("voltage", "commanded_voltage"), ("flow", "flow"), ("output", "corrected_kg_h")):
+            bucket[key] += row[source] * seconds
+        bucket["minimum_output"] = min(bucket["minimum_output"], row["corrected_kg_h"])
+        bucket["maximum_output"] = max(bucket["maximum_output"], row["corrected_kg_h"])
+        bucket["uncertainty_known"] &= row["lower_kg_h"] is not None
+        if row["lower_kg_h"] is not None:
+            bucket["lower"] = min(bucket["lower"] if bucket["lower"] is not None else 1e30, row["lower_kg_h"])
+            bucket["upper"] = max(bucket["upper"] if bucket["upper"] is not None else -1e30, row["upper_kg_h"])
+
+    def review(self):
+        candidate = deepcopy(self.candidate)
+        if candidate and candidate["kind"] == "reference":
+            for bucket in candidate["bins"].values():
+                seconds = bucket["seconds"]
+                bucket["ready"] = (seconds >= 1800 and len(bucket["cycles"]) >= 3 and bucket["output"] > 0)
+                bucket["value"] = bucket["output"] / seconds if seconds else None
+                bucket["command"] = bucket["voltage"] / seconds if seconds else None
+                bucket["airflow"] = bucket["flow"] / seconds if seconds else None
+                if not bucket["uncertainty_known"]: bucket["lower"] = bucket["upper"] = None
+                if bucket["lower"] is not None and bucket["lower"] <= 0: bucket["ready"] = False
+            candidate["ready"] = any(b["ready"] for b in candidate["bins"].values())
+        return candidate
+
+    def _reference_rate(self, voltage, flow):
+        if not self.reference or self.reference["generation"] != self.generation: return None
+        bins = sorted((int(index), bucket) for index, bucket in self.reference["bins"].items())
+        matched = [(idx, b) for idx, b in bins if abs(flow / b["airflow"] - 1) <= 0.1 + 1e-9]
+        for _, bucket in matched:
+            if abs(voltage - bucket["command"]) < 1e-6:
+                return {"value": bucket["value"], "lower": bucket["lower"], "upper": bucket["upper"]}
+        for (left_idx, left), (right_idx, right) in zip(matched, matched[1:]):
+            if right_idx - left_idx != 1 or not left["command"] <= voltage <= right["command"]: continue
+            weight = (voltage - left["command"]) / (right["command"] - left["command"])
+            known = left["lower"] is not None and right["lower"] is not None
+            return dict(value=left["value"] * (1 - weight) + right["value"] * weight,
+                        lower=min(left["lower"], right["lower"]) if known else None,
+                        upper=max(left["upper"], right["upper"]) if known else None)
+        return None
+
+    @staticmethod
+    def _trim(blocks, seconds):
+        total = sum(block["seconds"] for block in blocks)
+        while blocks and total - blocks[0]["seconds"] >= seconds - 1e-9:
+            total -= blocks.popleft()["seconds"]
+        if blocks and total > seconds:
+            old = blocks[0]
+            remaining = old["seconds"] - total + seconds
+            blocks[0] = {**old, "start": old["end"] - (old["end"] - old["start"]) * remaining / old["seconds"],
+                         "seconds": remaining}
+
+    def _append_evidence(self, block):
+        self.evidence.append(deepcopy(block))
+        self._trim(self.evidence, 7200)
+        if len(self.evidence) > self.config["max_evidence"]:
+            self.evidence.pop()
+            self.interrupt("CAPACITY_EXHAUSTED")
+
+    @staticmethod
+    def _score(blocks, minimum, cycles=0):
+        seconds = sum(b["seconds"] for b in blocks)
+        result = dict(value=None, lower=None, upper=None, seconds=seconds, status="insufficient_data",
+                      cycles=len({b["cycle"] for b in blocks}))
+        if seconds < minimum - 1e-6 or result["cycles"] < cycles: return result
+        measured = sum(b["measured"] * b["seconds"] for b in blocks)
+        reference = sum(b["reference"] * b["seconds"] for b in blocks)
+        if reference <= 0: return result
+        result.update(value=100 * measured / reference, status="provisional")
+        if all(b["lower"] is not None and b["reference_lower"] is not None for b in blocks):
+            lo_ref = sum(b["reference_lower"] * b["seconds"] for b in blocks)
+            hi_ref = sum(b["reference_upper"] * b["seconds"] for b in blocks)
+            if lo_ref <= 0: return {**result, "value": None, "status": "inconclusive"}
+            lo = sum(b["lower"] * b["seconds"] for b in blocks)
+            hi = sum(b["upper"] * b["seconds"] for b in blocks)
+            ratios = [100 * a / b for a, b in product((lo, hi), (lo_ref, hi_ref))]
+            result.update(lower=min(ratios), upper=max(ratios), status="valid")
+        return result
+
+    def telemetry(self, now):
+        safe_now = now if self.clock_valid and self._finite(now) else None
+        while self.evidence and safe_now is not None and self.evidence[0]["end"] < safe_now - 7 * 86400:
+            self.evidence.popleft()
+        if self.evidence and safe_now is not None and self.evidence[0]["start"] < safe_now - 7 * 86400:
+            first = self.evidence[0]
+            cutoff = now - 7 * 86400
+            first["seconds"] *= (first["end"] - cutoff) / (first["end"] - first["start"])
+            first["start"] = cutoff
+        delivery = self._score(self.delivery_window, 300) if self.reason == "QUALIFIED" else self._score([], 300)
+        canister = self._score(self.evidence, 1800, 3)
+        canister["ready"] = canister["seconds"] >= 7200 and canister["cycles"] >= 3
+        if not canister["ready"] and canister["value"] is not None: canister["status"] = "provisional"
+        if self.evidence:
+            canister["last_observed_at"] = self.evidence[-1]["end"]
+            if safe_now is not None and now - self.evidence[-1]["end"] > 86400:
+                canister.update(value=None, lower=None, upper=None, status="stale")
+        if not self.clock_valid:
+            delivery.update(value=None, status="unavailable")
+            canister.update(value=None, lower=None, upper=None, status="unavailable")
+        decision = "inconclusive"
+        if canister["status"] == "valid" and canister["ready"]:
+            if canister["upper"] < self.config["warning"]:
+                if not self.alert_active:
+                    self.alert_episode += 1
+                    self.alert_snapshot = deepcopy(canister)
+                self.alert_active = True
+                decision = "warn"
+            elif canister["lower"] > self.config["recovery"]:
+                self.alert_active = False
+                decision = "clear"
+        for key, metric in (("delivery", delivery), ("canister", canister)):
+            if metric["value"] is not None:
+                self.last_valid[key] = {**metric, "at": (self.evidence[-1]["end"] if key == "canister"
+                                                        else self.delivery_window[-1]["end"])}
+        return dict(schema_version=1, generation=self.generation, clock_valid=self.clock_valid,
+                    observed_at=max(self.last_measurement.get("source_times", []), default=None),
+                    source_contract=deepcopy(self.source_identity),
+                    measurement=deepcopy(self.last_measurement),
+                    qualification=dict(stable=self.reason == "QUALIFIED", reason=self.reason,
+                                       qualified_seconds=self.qualified_seconds, cycle_id=self.cycle),
+                    calibration=dict(status=("uncalibrated" if not self.reference else
+                                             "valid" if self.baseline["uncertainty_known"] else "provisional"),
+                                     reference_id=self.reference["revision"] if self.reference else None,
+                                     baseline=deepcopy(self.baseline), reference=deepcopy(self.reference),
+                                     coverage=list(self.reference["bins"]) if self.reference else [],
+                                     candidate=self.review()),
+                    delivery=delivery, canister=canister, last_valid=deepcopy(self.last_valid),
+                    alert=dict(decision=decision, episode=self.alert_episode, active=self.alert_active,
+                               warning=self.config["warning"], recovery=self.config["recovery"],
+                               evidence=deepcopy(self.alert_snapshot)),
+                    exclusions=dict(self.exclusions))
+
+    def export_state(self):
+        return deepcopy(dict(schema_version=1, config_id=self.config_id, generation=self.generation,
+                             revision=self.revision, baseline=self.baseline, reference=self.reference,
+                             candidate=self.candidate, archives=list(self.archives), evidence=list(self.evidence),
+                             cursors=self.cursors, cycle=self.cycle, off_period=self.off_period,
+                             source_identity=self.source_identity,
+                             off_period_open=self.off_period_open, quarantined_evidence=self.quarantined_evidence,
+                             last_valid=self.last_valid, alert_episode=self.alert_episode,
+                             alert_active=self.alert_active, alert_snapshot=self.alert_snapshot))
+
+    def restore(self, state):
+        if (state.get("schema_version") != 1 or state.get("config_id") != self.config_id
+                or len(state.get("evidence", [])) > self.config["max_evidence"]):
+            raise ValueError("Incompatible diagnostic storage")
+        # JSON roundtrip enforces finite numbers and detaches caller-owned state.
+        state = json.loads(json.dumps(state, allow_nan=False))
+        self._validate_state(state)
+        for key in ("generation", "revision", "baseline", "reference", "candidate", "cursors", "cycle", "off_period",
+                    "last_valid", "alert_episode", "alert_active", "source_identity", "off_period_open",
+                    "quarantined_evidence", "alert_snapshot"):
+            setattr(self, key, state[key])
+        self.evidence = deque(state["evidence"])
+        self.archives = deque(state["archives"], maxlen=4)
+        self.zero_since = self.demand_since = None
+        self.interrupt("RESTART")
+
+    @classmethod
+    def _validate_state(cls, state):
+        try:
+            for key in ("revision", "cycle", "off_period", "alert_episode"):
+                if type(state[key]) is not int or state[key] < 0: raise ValueError("Invalid counter")
+            if not isinstance(state["generation"], str) or len(state["generation"]) != 16:
+                raise ValueError("Invalid generation")
+            if type(state["alert_active"]) is not bool: raise ValueError("Invalid alert")
+            alert = state["alert_snapshot"]
+            if alert is not None and (not isinstance(alert, dict) or alert.get("status") != "valid"
+                                      or not all(cls._finite(alert.get(k)) for k in ("value", "lower", "upper"))
+                                      or not alert["lower"] <= alert["value"] <= alert["upper"]
+                                      or alert.get("seconds", 0) < 7200 or alert.get("cycles", 0) < 3):
+                raise ValueError("Invalid warning evidence")
+            if type(state["off_period_open"]) is not bool: raise ValueError("Invalid period")
+            if not isinstance(state["quarantined_evidence"], list): raise ValueError("Invalid quarantine")
+            if not isinstance(state["cursors"], dict) or not isinstance(state["last_valid"], dict):
+                raise ValueError("Invalid cursor/history")
+            if len(state["archives"]) > 4: raise ValueError("Invalid archives")
+            if state["source_identity"] is not None and not isinstance(state["source_identity"], dict):
+                raise ValueError("Invalid identity")
+            baseline = state["baseline"]
+            if baseline is not None:
+                if (not cls._finite(baseline["offset"]) or not cls._finite(baseline["residual"])
+                        or baseline["residual"] < 0 or type(baseline["uncertainty_known"]) is not bool):
+                    raise ValueError("Invalid baseline")
+                for key in ("upstream_t", "upstream_rh", "flow"):
+                    lo, hi = baseline["envelope"][key]
+                    if not cls._finite(lo) or not cls._finite(hi) or lo > hi: raise ValueError("Invalid envelope")
+            reference = state["reference"]
+            if reference is not None:
+                if baseline is None or reference["generation"] != state["generation"]:
+                    raise ValueError("Incompatible reference")
+                if not 1 <= len(reference["bins"]) <= 21: raise ValueError("Invalid bins")
+                for index, bucket in reference["bins"].items():
+                    if not 0 <= int(index) <= 20 or bucket["seconds"] < 1800 or len(set(bucket["cycles"])) < 3:
+                        raise ValueError("Invalid reference evidence")
+                    for key in ("value", "command", "airflow"):
+                        if not cls._finite(bucket[key]) or bucket[key] <= 0: raise ValueError("Invalid reference rate")
+                    if bucket["lower"] is not None:
+                        if not 0 < bucket["lower"] <= bucket["value"] <= bucket["upper"]:
+                            raise ValueError("Invalid reference bounds")
+            previous_end = -math.inf
+            for block in state["evidence"]:
+                if (block["generation"] != state["generation"] or reference is None
+                        or not all(cls._finite(block[key]) for key in
+                                   ("start", "end", "seconds", "measured", "reference"))
+                        or block["start"] < previous_end or not 0 < block["seconds"] <= 120
+                        or block["end"] <= block["start"]
+                        or abs(block["end"] - block["start"] - block["seconds"]) > 5 + 1e-6
+                        or block["reference"] <= 0):
+                    raise ValueError("Invalid evidence block")
+                for lo, hi in (("lower", "upper"), ("reference_lower", "reference_upper")):
+                    if block[lo] is not None and (not cls._finite(block[lo]) or not cls._finite(block[hi])
+                                                 or block[lo] > block[hi]):
+                        raise ValueError("Invalid evidence bounds")
+                previous_end = block["end"]
+            if state["candidate"] is not None:
+                candidate = state["candidate"]
+                if (candidate["kind"] not in ("baseline", "reference") or candidate["generation"] != state["generation"]
+                        or len(candidate["windows"]) > 4 or len(candidate["bins"]) > 21):
+                    raise ValueError("Invalid candidate")
+        except (KeyError, TypeError, OverflowError) as error:
+            raise ValueError("Malformed diagnostic storage") from error
+
+
+class DiagnosticStore:
+    """Versioned atomic storage outside the HACS-installed source directory."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+
+    def load(self):
+        if self.path.stat().st_size > 8 * 1024 * 1024: raise ValueError("Diagnostic storage exceeds size bound")
+        return json.loads(self.path.read_text(),
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite")))
+
+    def save(self, state):
+        payload = json.dumps(state, allow_nan=False, separators=(",", ":"))
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(prefix=self.path.name + ".", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try: os.fsync(directory)
+            finally: os.close(directory)
+        finally:
+            if os.path.exists(name): os.unlink(name)
+
+
+class HapsicDiagnostics(hass.Hass):
+    """Separately scheduled AppDaemon observer, with no actuator dependency.
+
+    MQTT event/service API: https://appdaemon.readthedocs.io/en/latest/MQTT_API_REFERENCE.html
+    Configure pin_app: true so callbacks serialize; only immutable persistence
+    snapshots cross to the single I/O worker. Work queue is bounded to one save.
+    """
+
+    SOURCES = {
+        "upstream_t": "sensor.zehnder_comfoair_q_a4cb9c_supply_air_temperature",
+        "upstream_rh": "sensor.zehnder_comfoair_q_a4cb9c_supply_air_humidity",
+        "downstream_t": "sensor.shelly0110dimg3_28372f3e866c_temperature_2",
+        "downstream_rh": "sensor.shelly0110dimg3_28372f3e866c_input_100_analog",
+        "flow": "sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow",
+        "pressure": "sensor.gw1200b_absolute_pressure",
+    }
+
+    def initialize(self):
+        self.boot_id = str(uuid4())
+        self.connection_revision = 0
+        self.mqtt_online = None
+        self.sequence = 0
+        self.producer = self.args.get("producer_id", "hapsic-python")
+        self.namespace = self.args.get("mqtt_namespace", "mqtt")
+        self.topic = self.args.get("diagnostics_topic", "hapsic/telemetry/diagnostics")
+        self.control_topic = self.args.get("control_topic", "hapsic/telemetry/state")
+        self.sources = {key: {"entity": entity, **self.args.get("sources", {}).get(key, {})}
+                        for key, entity in self.SOURCES.items()}
+        self.observer = DeliveryObserver({**self.args.get("diagnostic_config", {}), "sources": self.sources})
+        base_path = Path(self.args.get("data_path", "/config/hapsic-data/diagnostics-v1.json"))
+        # A changed binding/policy never overwrites the previous configuration's history.
+        self.store = DiagnosticStore(base_path.with_name(
+            f"{base_path.stem}-{self.observer.config_id}{base_path.suffix}"))
+        self.commands = queue.Queue(maxsize=16)
+        self.requests = deque(maxlen=64)
+        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hapsic-diagnostic-storage")
+        self.pending_save = None
+        self.pending_acks = deque(maxlen=16)
+        self.last_checkpoint = time.monotonic()
+        self.control = None
+        self.storage_error = None
+        try:
+            state = self.store.load()
+            self.observer.restore(state)
+            self.requests.extend(state.get("requests", []))
+        except FileNotFoundError:
+            pass
+        except Exception as error:
+            self.storage_error = type(error).__name__
+            self.log(f"Diagnostic storage rejected: {type(error).__name__}; commissioning required", level="WARNING")
+        try:
+            self.listen_event(self.diagnostic_connectivity, "MQTT_MESSAGE", namespace=self.namespace)
+        except Exception as error:
+            self.log(f"Diagnostic connection events unavailable: {type(error).__name__}", level="WARNING")
+        for topic in (self.control_topic, self.topic + "/command"):
+            try:
+                self.call_service("mqtt/subscribe", namespace=self.namespace, topic=topic)
+                self.listen_event(self.diagnostic_message, "MQTT_MESSAGE", namespace=self.namespace, topic=topic)
+            except Exception as error:
+                self.log(f"Diagnostic MQTT unavailable: {type(error).__name__}", level="WARNING")
+        self.run_every(self.diagnostic_tick, "now", 5)
+
+    def diagnostic_connectivity(self, event, data, kwargs):
+        state = data.get("state")
+        if state not in ("Connected", "Disconnected"): return
+        self.mqtt_online = state == "Connected"
+        self.control = None
+        self.observer.zero_since = self.observer.demand_since = None
+        self.observer.interrupt("MQTT_CONNECTION_CHANGED")
+        if self.mqtt_online:
+            self.connection_revision += 1
+            for topic in (self.control_topic, self.topic + "/command"):
+                try:
+                    self.call_service("mqtt/subscribe", namespace=self.namespace, topic=topic)
+                except Exception as error:
+                    self.log(f"Diagnostic resubscribe failed: {type(error).__name__}", level="WARNING")
+
+    def diagnostic_message(self, event, data, kwargs):
+        try:
+            if data.get("retain", False): return
+            payload = data.get("payload", "")
+            if len(payload) > 32768: raise ValueError("Oversized diagnostic message")
+            payload = json.loads(payload)
+            if data["topic"] == self.control_topic:
+                voltage = payload["io"]["steam_volts"]
+                state = payload["fsm"]["state"]
+                if state not in {"INITIALIZING", "STANDBY", "ACTIVE_CRUISE", "TURBO_PENDING", "ACTIVE_TURBO",
+                                 "HYGIENIC_PURGE", "FAULT", "MAINTENANCE_LOCKOUT"}:
+                    raise ValueError("Unknown controller state")
+                fault = state == "FAULT"
+                if not DeliveryObserver._finite(voltage) or not 0 <= voltage <= 10: raise ValueError("Invalid command")
+                if self.control and (fault or voltage != self.control["value"]):
+                    values = [r["commanded_voltage"] for r in self.observer.window] + [voltage, self.control["value"]]
+                    if (fault or (voltage == 0) != (self.control["value"] == 0)
+                            or max(values) - min(values) > self.observer.config["command_range"] + 1e-9):
+                        self.observer.interrupt("COMMAND_EVENT")
+                self.control = dict(value=voltage, unit="V", source=self.control_topic, verified=True,
+                                    report_id=str(time.monotonic_ns()), reported_at=time.time(), fault=fault,
+                                    controller_state=state)
+            else:
+                if (payload.get("schema_version") != 1 or payload.get("producer_id") != self.producer
+                        or not isinstance(payload.get("request_id"), str) or len(payload["request_id"]) > 128):
+                    raise ValueError("Invalid diagnostic command envelope")
+                if payload["request_id"] in self.requests:
+                    self._ack(dict(schema_version=1, producer_id=self.producer,
+                                   request_id=payload["request_id"], status="accepted"))
+                    return
+                if (not payload["request_id"] or "\0" in payload["request_id"]
+                        or not DeliveryObserver._finite(payload.get("issued_at"))
+                        or not -5 <= time.time() - payload["issued_at"] <= 30):
+                    raise ValueError("Expired command")
+                self.commands.put_nowait((time.monotonic(), payload))
+        except (ValueError, TypeError, KeyError, queue.Full, RecursionError):
+            if data.get("topic") == self.control_topic:
+                self.control = None
+                self.observer.zero_since = self.observer.demand_since = None
+            self.observer.interrupt("MESSAGE_REJECTED")
+
+    @staticmethod
+    def _timestamp(value):
+        if DeliveryObserver._finite(value): return value
+        if isinstance(value, str): return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        raise ValueError("Missing source timestamp")
+
+    def _snapshot(self):
+        snapshot = {}
+        for key, binding in self.sources.items():
+            state = self.get_state(binding["entity"], attribute="all")
+            if not isinstance(state, dict): continue
+            attrs = state.get("attributes", {})
+            field = binding.get("timestamp_field", "last_reported")
+            timestamp = attrs.get(field, state.get(field))
+            try:
+                value = float(state["state"])
+                if not math.isfinite(value): continue
+                unit = attrs.get("unit_of_measurement", binding.get("unit"))
+                snapshot[key] = dict(value=value, unit=unit, reported_at=self._timestamp(timestamp),
+                                     report_id=str(timestamp), source=binding["entity"],
+                                     verified=binding.get("reporting_verified", False),
+                                     accuracy=binding.get("accuracy"))
+            except (ValueError, TypeError, KeyError):
+                continue
+        if self.control: snapshot["command"] = deepcopy(self.control)
+        return snapshot
+
+    def _publish(self, topic, payload):
+        if self.mqtt_online is False: raise RuntimeError("Diagnostic MQTT disconnected")
+        self.call_service("mqtt/publish", namespace=self.namespace, topic=topic, retain=False, qos=0,
+                          payload=json.dumps(payload, allow_nan=False, separators=(",", ":")))
+
+    def _save_completed(self):
+        if self.pending_save is None or not self.pending_save[0].done(): return
+        future, replacement, ack = self.pending_save
+        self.pending_save = None
+        try:
+            future.result()
+        except Exception as error:
+            self.storage_error = type(error).__name__
+            self.observer.interrupt("STORAGE_ERROR")
+            if ack: self._ack({**ack, "status": "rejected", "reason": "STORAGE_ERROR"})
+            return
+        self.storage_error = None
+        if replacement is not None:
+            self.observer = replacement
+            self.requests.append(ack["request_id"])
+        if ack: self._ack({**ack, "status": "accepted"})
+
+    def _ack(self, payload):
+        try:
+            self._publish(self.topic + "/ack", payload)
+        except Exception:
+            self.pending_acks.append(payload)
+
+    def diagnostic_tick(self, kwargs):
+        try:
+            self._save_completed()
+            if self.pending_acks:
+                self._ack(self.pending_acks.popleft())
+            if self.pending_save is None and not self.commands.empty():
+                received, action = self.commands.get_nowait()
+                ack = dict(request_id=action["request_id"], producer_id=self.producer, schema_version=1)
+                try:
+                    if time.monotonic() - received > 30 or action["request_id"] in self.requests:
+                        raise ValueError("Expired or duplicate request")
+                    replacement = DeliveryObserver(self.observer.config)
+                    replacement.restore(self.observer.export_state())
+                    replacement.command(action["action"], action.get("revision"), healthy=action.get("healthy") is True)
+                    state = replacement.export_state()
+                    state["requests"] = (list(self.requests) + [action["request_id"]])[-64:]
+                    self.pending_save = (self.worker.submit(self.store.save, state), replacement, ack)
+                    self.observer.interrupt("STORAGE_PENDING")
+                except (ValueError, KeyError):
+                    self._publish(self.topic + "/ack", {**ack, "status": "rejected", "reason": "INVALID_ACTION"})
+            now, mono = time.time(), time.monotonic()
+            snapshot = self._snapshot()
+            self.sequence += 1
+            self._publish(self.topic + "/inputs", dict(
+                schema_version=1, producer_id=self.producer, boot_id=self.boot_id,
+                sequence=self.sequence, connection_id=f"{self.boot_id}:{self.connection_revision}",
+                published_at=now, samples=snapshot))
+            accepting = self.pending_save is not None and self.pending_save[1] is not None
+            if accepting:
+                payload = self.observer.telemetry(now)
+            else:
+                payload = self.observer.observe(snapshot, mono, now,
+                                                synced=self.args.get("clock_verified", False))
+            if self.pending_save is None and mono - self.last_checkpoint >= 300:
+                state = self.observer.export_state()
+                state["requests"] = list(self.requests)
+                self.pending_save = (self.worker.submit(self.store.save, state), None, None)
+                self.last_checkpoint = mono
+            payload.update(producer_id=self.producer, boot_id=self.boot_id, sequence=self.sequence,
+                           published_at=now, storage_error=self.storage_error)
+            self._publish(self.topic, payload)
+        except Exception as error:
+            self.observer.zero_since = self.observer.demand_since = None
+            self.observer.interrupt("OBSERVER_ERROR")
+            self.log(f"Diagnostic tick failed: {type(error).__name__}", level="WARNING")
+
+    def terminate(self):
+        self.worker.shutdown(wait=False, cancel_futures=True)
 
 
 class HapsicController(hass.Hass):
@@ -14,9 +960,99 @@ class HapsicController(hass.Hass):
     SHELLY_OFFLINE_FAULT_SECONDS = 60.0
     SENSOR_LOSS_GRACE_SECONDS = 60.0
 
+    def _restore_learning(self, restore=True):
+        """Restore counted learning; never infer training from a positive rate."""
+        self.learning_write_ready = False
+        raw = self.get_state("input_text.hapsic_boiler_curve")
+        if raw == "":
+            self.learning_write_ready = True
+            return
+        if raw in (None, "unknown", "unavailable"):
+            return
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                if len(data) != 4 or any(
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0 for value in data
+                ):
+                    raise ValueError("Invalid legacy learning array")
+                # Preserve the original payload durably before any v2 overwrite.
+                path = Path(self.args.get("learning_backup_path", "/config/hapsic-data/legacy-curve-v1.json"))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    with path.open("x", encoding="utf-8") as stream:
+                        stream.write(raw)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    directory = os.open(path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                except FileExistsError:
+                    pass
+                if path.read_text() != raw:
+                    raise ValueError("Legacy learning backup differs; refusing overwrite")
+                # A prior directory-sync failure may have left a matching file.
+                # Re-establish both durability barriers before authorizing overwrite.
+                with path.open("rb") as stream:
+                    os.fsync(stream.fileno())
+                directory = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+                # Historical rates have no trustworthy counts. Requalify them.
+            elif isinstance(data, dict) and data.get("v") == 2:
+                rates, counts = data["curve"], data["counts"]
+                if len(rates) != 4 or len(counts) != 4:
+                    raise ValueError("Expected four learning bins")
+                for rate, count in zip(rates, counts):
+                    if (isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate)
+                            or type(count) is not int or not 0 <= count <= 0xffffffff
+                            or (count == 0 and rate != 0) or (count > 0 and rate <= 0)):
+                        raise ValueError("Invalid learning rate/count")
+                if restore:
+                    self.boiler_curve, self.boiler_curve_counts = list(rates), list(counts)
+            else:
+                raise ValueError("Unsupported learning record")
+            self.learning_write_ready = True
+        except (ValueError, TypeError, KeyError, OSError) as error:
+            self.log(f"Learning restore/migration blocked: {error}", level="WARNING")
+
+    def _checkpoint_learning(self):
+        if not self.learning_write_ready:
+            # A helper restored after AppDaemon startup must not permanently
+            # disable checkpoints or discard the fresh in-memory observations.
+            self._restore_learning(restore=False)
+        if not self.learning_write_ready:
+            return
+        try:
+            payload = json.dumps(dict(v=2, curve=self.boiler_curve, counts=self.boiler_curve_counts),
+                                 separators=(",", ":"), allow_nan=False)
+            limit = self.get_state("input_text.hapsic_boiler_curve", attribute="max")
+            if not isinstance(limit, (int, float)) or not math.isfinite(limit) or not 1 <= limit <= 255:
+                raise ValueError("Learning helper maximum length unavailable")
+            if len(payload) > limit:
+                raise ValueError("Learning checkpoint exceeds helper limit")
+            self.call_service("input_number/set_value", entity_id="input_number.hapsic_chi_ema",
+                              value=round(self.chi_ema, 3))
+            self.call_service("input_text/set_value", entity_id="input_text.hapsic_boiler_curve", value=payload)
+        except Exception as error:
+            self.log(f"Learning checkpoint failed: {error}", level="WARNING")
+
+    def _invalidate_current_diagnostics(self):
+        self.chi_instant = 0.0
+        self.chi_eligible = False
+        self._last_measured_steam = 0.0
+        self.calc_flux = math.nan
+        self.calc_loss_vent = math.nan
+        self.boil_status = "UNKNOWN" if self.fsm_state == "FAULT" else "COLD"
+
     def initialize(self):
         """
-        HAPSIC 2.7.4
+        HAPSIC 2.8.0
         Includes:
         1. Absolute Dew Point Setpoint Paradigm.
         2. Real-time Building Physics Mass Balance (1380 CFM50 / 17.0 N-Factor).
@@ -132,7 +1168,7 @@ class HapsicController(hass.Hass):
         # Restore CHI EMA from persistent storage
         try:
             stored_chi = float(self.get_state("input_number.hapsic_chi_ema"))
-            self.chi_ema = stored_chi if stored_chi > 0 else 1.0
+            self.chi_ema = stored_chi if math.isfinite(stored_chi) and 0 <= stored_chi <= 2 else 1.0
         except (ValueError, TypeError):
             self.chi_ema = 1.0
 
@@ -147,21 +1183,10 @@ class HapsicController(hass.Hass):
         self.BOILER_CURVE_MIN_SAMPLES = 50  # Gate: don't use until 50 data points
         self.boiler_curve_alpha = 0.002   # ~6 min half-life at 5s ticks
         self.boiler_curve_counts = [0] * self.BOILER_CURVE_BINS
+        self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
 
-        # Restore boiler curve from persistent storage
-        try:
-            stored_curve = json.loads(
-                self.get_state("input_text.hapsic_boiler_curve"))
-            if isinstance(stored_curve, list) and len(stored_curve) == self.BOILER_CURVE_BINS:
-                self.boiler_curve = [float(v) for v in stored_curve]
-                # Mark restored bins as pre-trained
-                self.boiler_curve_counts = [
-                    999 if v > 0 else 0 for v in self.boiler_curve]
-                self.log(f"Boiler curve restored: {self.boiler_curve}")
-            else:
-                self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
-        except (ValueError, TypeError, json.JSONDecodeError, Exception):
-            self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
+        self._restore_learning()
+        self._invalidate_current_diagnostics()
 
         # --- 3. RESTART HANDLING (Safety Park) ---
         self.log("SYSTEM RESTART DETECTED: Executing Safety Park Protocol...", level="WARNING")
@@ -633,6 +1658,7 @@ class HapsicController(hass.Hass):
     # =========================================================================
 
     def master_tick(self, kwargs):
+        self._invalidate_current_diagnostics()
         now = time.time()
         self.dt = now - self.last_tick_ts
         self.last_tick_ts = now
@@ -1145,6 +2171,8 @@ class HapsicController(hass.Hass):
         return self.MAX_CAPACITY * self.chi_ema
 
     def run_diagnostics(self):
+        self.chi_eligible = False
+        self.chi_instant = 0.0
         self.calc_steam_mass = (self.steam_voltage / 10.0) * self.MAX_CAPACITY
 
         cfm_nat = 1380.0 / 17.0
@@ -1166,7 +2194,10 @@ class HapsicController(hass.Hass):
             actual_grains = (self.duct_w - self.supply_w) * dry_air_mass_lbs_hr / 60.0
 
             # CHI Gating strictly evaluated off physical boil state
-            if theo_grains > 100 and self.boil_achieved and not self.stasis_active:
+            if (theo_grains > 100 and self.boil_achieved and not self.stasis_active
+                    and all(math.isfinite(v) for v in (actual_grains, theo_grains, self.supply_flow))
+                    and self.supply_flow > 0):
+                self.chi_eligible = True
                 self.chi_instant = actual_grains / theo_grains
                 self.chi_instant = max(0.0, min(2.0, self.chi_instant))
                 self.chi_ema = (self.chi_alpha * self.chi_instant) + ((1 - self.chi_alpha) * self.chi_ema)
@@ -1178,23 +2209,16 @@ class HapsicController(hass.Hass):
 
                 bin_idx = self._boiler_curve_bin_idx(self.steam_voltage)
                 if bin_idx >= 0 and actual_lbs_hr > 0:
-                    a = self.boiler_curve_alpha
-                    self.boiler_curve[bin_idx] = (
-                        a * actual_lbs_hr
-                        + (1 - a) * self.boiler_curve[bin_idx])
-                    self.boiler_curve_counts[bin_idx] += 1
+                    count = self.boiler_curve_counts[bin_idx]
+                    a = 1.0 / (count + 1) if count < self.BOILER_CURVE_MIN_SAMPLES else self.boiler_curve_alpha
+                    self.boiler_curve[bin_idx] += a * (actual_lbs_hr - self.boiler_curve[bin_idx])
+                    self.boiler_curve_counts[bin_idx] = min(count + 1, 0xffffffff)
 
-                # Persist CHI + boiler curve every 5 minutes (60 ticks)
-                if self.tick_counter % 60 == 0:
-                    self.call_service("input_number/set_value",
-                                      entity_id="input_number.hapsic_chi_ema",
-                                      value=round(self.chi_ema, 3))
-                    self.call_service("input_text/set_value",
-                                      entity_id="input_text.hapsic_boiler_curve",
-                                      value=json.dumps(
-                                          [round(v, 4) for v in self.boiler_curve]))
             else:
                 self.chi_instant = 0.0
+
+        if self.tick_counter % 60 == 0:
+            self._checkpoint_learning()
 
     def update_economy_advisory(self):
         """Observe periods where active steaming is not producing useful net flux.
@@ -1266,6 +2290,11 @@ class HapsicController(hass.Hass):
             self.economy_advisory_target_delta = 0.0
 
     def publish_telemetry(self):
+        self.calc_steam_mass = (self.steam_voltage / 10.0) * self.MAX_CAPACITY
+        if self.fsm_state == "FAULT":
+            self.boil_status = "UNKNOWN"
+        elif self.steam_voltage <= 0:
+            self.boil_status = "COLD"
         struct_vel = 0.0
         if len(self.room_dp_buffer) > 0:
             struct_vel = (self.room_dp - self.room_dp_buffer[0]) * 4
@@ -1323,13 +2352,16 @@ class HapsicController(hass.Hass):
                 "suggested_target_delta": round(self.economy_advisory_target_delta, 1),
             },
             "health": {
+                "math_revision": 2,
+                "chi_eligible": getattr(self, "chi_eligible", False),
                 "boil_status": getattr(self, 'boil_status', "COLD"),
-                "chi_ratio": round(self.chi_instant, 3) if hasattr(self, 'chi_instant') else 0.0,
+                "chi_ratio": round(self.chi_instant, 3) if getattr(self, "chi_eligible", False) else None,
                 "chi_ema": round(self.chi_ema, 3),
                 "boiler_curve": [round(v, 3) for v in self.boiler_curve],
                 "boiler_curve_samples": list(self.boiler_curve_counts),
                 "effective_max_capacity": round(self.get_effective_max_capacity(), 3),
-                "measured_steam_lbs_hr": round(getattr(self, '_last_measured_steam', 0.0), 3),
+                "measured_steam_lbs_hr": (round(self._last_measured_steam, 3)
+                                          if getattr(self, "chi_eligible", False) else None),
                 "production_efficiency": round(
                     (self._last_measured_steam / self.calc_steam_mass * 100.0)
                     if self.calc_steam_mass > 0.1 and getattr(self, '_last_measured_steam', 0.0) > 0.0
@@ -1338,4 +2370,10 @@ class HapsicController(hass.Hass):
             }
         }
 
-        self.call_service("mqtt/publish", topic="hapsic/telemetry/state", payload=json.dumps(payload))
+        def strict(value):
+            if isinstance(value, dict): return {key: strict(item) for key, item in value.items()}
+            if isinstance(value, list): return [strict(item) for item in value]
+            if isinstance(value, float) and not math.isfinite(value): return None
+            return value
+        self.call_service("mqtt/publish", topic="hapsic/telemetry/state",
+                          payload=json.dumps(strict(payload), allow_nan=False))

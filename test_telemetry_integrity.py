@@ -66,7 +66,7 @@ def load_controller():
     return module
 
 
-def test_telemetry_schema_integrity():
+def check_telemetry_schema_integrity():
     """
     Rigorously validates that the publish_telemetry method correctly maps
     internal state attributes to the MQTT JSON payload without silent fallbacks.
@@ -100,7 +100,9 @@ def test_telemetry_schema_integrity():
     controller.target_duct_dp = 58.0
     controller.outdoor_dp = 42.0
     controller.steam_voltage = 6.5
+    controller.MAX_CAPACITY = 4.0
     controller.calc_steam_mass = 2.1
+    controller.chi_eligible = True
     controller._last_measured_steam = 1.89
     controller.calc_flux = 0.45
     controller.calc_loss_vent = 1.12
@@ -166,11 +168,13 @@ def test_telemetry_schema_integrity():
     # 3. HEALTH
     health = payload.get("health", {})
     health_checks = {
+        "math_revision": 2,
+        "chi_eligible": True,
         "boil_status": "BOILING",
         "chi_ratio": 0.95,
         "chi_ema": 0.94,
         "measured_steam_lbs_hr": 1.89,
-        "production_efficiency": 90.0,
+        "production_efficiency": 72.7,
     }
     for key, expected in health_checks.items():
         actual = health.get(key)
@@ -180,6 +184,8 @@ def test_telemetry_schema_integrity():
     # 4. PHYSICS & IO
     if payload.get("io", {}).get("steam_volts") != 6.5:
         errors.append(f"  ❌ io.steam_volts: Expected 6.5, got {payload.get('io', {}).get('steam_volts')}")
+    if payload.get("io", {}).get("steam_mass") != 2.6:
+        errors.append("  ❌ io.steam_mass: Must derive from applied 6.5 V command and 4 lb/h capacity")
     if payload.get("physics", {}).get("flux_net") != 0.45:
         errors.append(f"  ❌ physics.flux_net: Expected 0.45, got {payload.get('physics', {}).get('flux_net')}")
 
@@ -208,6 +214,10 @@ def test_telemetry_schema_integrity():
 
     print("✅ ALL TELEMETRY MAPPINGS VERIFIED. NO SILENT FALLBACKS DETECTED.")
     return True
+
+
+def test_telemetry_schema_integrity():
+    assert check_telemetry_schema_integrity()
 
 
 def test_passive_import_advisory_math():
@@ -241,7 +251,7 @@ if __name__ == "__main__":
     print("  HAPSIC Telemetry Integrity Tests")
     print("=" * 60)
 
-    success = test_telemetry_schema_integrity()
+    success = check_telemetry_schema_integrity()
 
     print("\n  TOTAL: 1/1 passed" if success else "\n  TOTAL: 0/1 passed")
     if not success:

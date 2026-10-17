@@ -1,0 +1,21 @@
+# Exercise the real MQTT serializer on the desk build; output remains shadowed
+# by the existing DESK_MODE build flag. No firmware flashing in this rollout.
+substitutions:
+  diagnostic_producer: hapsic-desk
+  diagnostic_topic: hapsic-desk/telemetry/diagnostics
+
+packages:
+  controller: !include stamplc_desk.yaml
+  diagnostics: !include packages/hapsic_diagnostics_firmware.yaml
+
+esp32:
+  partitions: diagnostic-partitions.csv
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: hapsic-desk
+
+esphome:
+  build_path: .esphome/build/hapsic-desk-diagnostics

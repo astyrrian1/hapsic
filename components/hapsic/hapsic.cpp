@@ -143,18 +143,7 @@ void HapsicController::setup() {
   last_tick_ms_ = esp_timer_get_time() / 1000;
   last_ha_update_ms_ = esp_timer_get_time() / 1000;
 
-  // Load persisted state from NVS
-  pref_ = global_preferences->make_preference<HapsicPersist>(fnv1_hash("hapsic_state"));
-  HapsicPersist stored;
-  if (pref_.load(&stored) && stored.magic == 0xABCD1234) {
-    chi_ema_ = stored.chi_ema;
-    cached_target_dp_ = stored.cached_target_rh;  // Re-purposed NVRAM slot
-    ESP_LOGI("hapsic", "NVS restored: CHI=%.4f, target_dp=%.1fC", chi_ema_, cached_target_dp_);
-  } else {
-    chi_ema_ = 1.0f;
-    cached_target_dp_ = DEFAULT_TARGET_DP;
-    ESP_LOGI("hapsic", "NVS empty — defaults: CHI=1.0, target_dp=%.1fC", DEFAULT_TARGET_DP);
-  }
+  restore_learning();
 
   // Reset PRD batch timers
   boil_achieved_ = false;
@@ -213,6 +202,13 @@ void HapsicController::setup() {
 // =============================================================================
 
 void HapsicController::update() {
+  chi_instant_ = 0;
+  chi_eligible_ = false;
+  last_measured_steam_ = 0;
+  net_flux_ = NAN;
+  vent_loss_ = NAN;
+  boil_status_ = "COLD";
+
 #ifdef USE_ESP32
   esp_task_wdt_reset();  // Pet the watchdog
 #endif
@@ -567,7 +563,8 @@ bool HapsicController::read_sensors() {
 
     // Use learned max delivery rate (lbs/hr → kg/h) for realistic feasibility
     float effective_max_kg_hr = get_effective_max_capacity() * 0.453592f;
-    float delta_w = (effective_max_kg_hr * 1000.0f) / (total_m3h * RHO);
+    float dry_air_kg_hr = total_m3h * 0.5886f * 60.0f * RHO_IMP * 0.453592f;
+    float delta_w = (effective_max_kg_hr * 1000.0f) / dry_air_kg_hr;
 
     max_achievable_dp_ = MagnusTetens::target_dp_from_w(incoming_w + delta_w, P_ATM);
   } else {
@@ -977,6 +974,18 @@ void HapsicController::execute_loop_b() {
     }
   }
 
+  // Slew steps can cross the limits applied above. Enforce the existing
+  // actuator envelope after the last voltage modification (as in the twin).
+  float before_final_limits = next_voltage;
+  next_voltage = std::clamp(next_voltage, 0.0f, 9.5f);
+  if (!stasis_active_) {
+    next_voltage = std::min(next_voltage, ceiling_volts_);
+    if (next_voltage > 0 && next_voltage < SOLENOID_MIN)
+      next_voltage = 0;
+  }
+  if (next_voltage != before_final_limits)
+    active_limit_ = "FINAL_SAFETY_CLAMP";
+
   // Universal Directional Freezing Rule
   if (next_voltage < ideal_voltage_ && error > 0) {
     if (next_voltage == 0.0f) {
@@ -1014,6 +1023,45 @@ void HapsicController::write_output() {
 // DIAGNOSTICS — CHI, Boiling, NVS Persistence
 // =============================================================================
 
+void HapsicController::restore_learning() {
+  chi_ema_ = 1;
+  cached_target_dp_ = DEFAULT_TARGET_DP;
+  pref_ = global_preferences->make_preference<HapsicLearningV2>(fnv1_hash("hapsic_learning_v2"));
+  HapsicLearningV2 data;
+  if (pref_.load(&data) && data.version == 2 && std::isfinite(data.chi_ema) && data.chi_ema >= 0 && data.chi_ema <= 2 &&
+      std::isfinite(data.target_dp_c) && data.target_dp_c > -40 && data.target_dp_c <= 40) {
+    bool valid = true;
+    for (unsigned i = 0; i < 4; ++i)
+      valid = valid && std::isfinite(data.curve[i]) &&
+              ((data.counts[i] == 0 && data.curve[i] == 0) || (data.counts[i] > 0 && data.curve[i] > 0));
+    if (valid) {
+      chi_ema_ = data.chi_ema;
+      cached_target_dp_ = data.target_dp_c;
+      for (unsigned i = 0; i < 4; ++i) {
+        boiler_curve_[i] = data.curve[i];
+        boiler_curve_counts_[i] = data.counts[i];
+      }
+      return;
+    }
+  }
+  auto legacy = global_preferences->make_preference<HapsicPersist>(fnv1_hash("hapsic_state"));
+  HapsicPersist old;
+  if (legacy.load(&old) && old.magic == 0xABCD1235 && std::isfinite(old.cached_target_rh) &&
+      old.cached_target_rh > -40 && old.cached_target_rh <= 40)
+    cached_target_dp_ = old.cached_target_rh;
+}
+void HapsicController::checkpoint_learning() {
+  HapsicLearningV2 data;
+  data.chi_ema = chi_ema_;
+  data.target_dp_c = cached_target_dp_;
+  for (unsigned i = 0; i < 4; ++i) {
+    data.curve[i] = boiler_curve_[i];
+    data.counts[i] = boiler_curve_counts_[i];
+  }
+  if (!pref_.save(&data))
+    ESP_LOGW("hapsic", "Learning checkpoint queue failed");
+}
+
 void HapsicController::run_diagnostics() {
   steam_mass_kg_hr_ = (steam_voltage_ / 10.0f) * max_capacity_;
 
@@ -1022,20 +1070,25 @@ void HapsicController::run_diagnostics() {
   float vent_mass_factor = ((supply_flow_ * 0.5886f) * 60.0f * RHO_IMP) / 7000.0f;
   float infil_mass_factor = (cfm_nat * 60.0f * RHO_IMP) / 7000.0f;
 
-  vent_loss_ = vent_mass_factor * std::max(0.0f, room_w_ - supply_w_);
-  float loss_infil = infil_mass_factor * std::max(0.0f, room_w_ - outdoor_w_);
-  net_flux_ = steam_mass_kg_hr_ - (vent_loss_ + loss_infil);
+  vent_loss_ = vent_mass_factor * std::max(0.0f, room_w_ - supply_w_) * 7.0f;
+  float loss_infil = infil_mass_factor * std::max(0.0f, room_w_ - outdoor_w_) * 7.0f;
+  net_flux_ = steam_mass_kg_hr_ / 0.453592f - (vent_loss_ + loss_infil);
 
   last_measured_steam_ = 0.0f;
-  if (active_cruise_ticks_ > BOILING_MIN_TICKS && steam_voltage_ > BOILING_MIN_VOLTAGE) {
+  chi_eligible_ = false;
+  chi_instant_ = 0;
+  boil_status_ = "COLD";
+  if (boil_achieved_ && steam_voltage_ > BOILING_MIN_VOLTAGE) {
     boil_status_ = "BOILING";
 
     float dry_air_mass_lbs_hr = (supply_flow_ * 0.5886f) * 60.0f * RHO_IMP;
-    float theo_grains = steam_mass_kg_hr_ * (7000.0f / 60.0f);
-    float actual_grains = (duct_w_ - supply_w_) * dry_air_mass_lbs_hr / 60.0f;
+    float theo_grains = (steam_mass_kg_hr_ / 0.453592f) * (7000.0f / 60.0f);
+    float actual_grains = (duct_w_ - supply_w_) * 7.0f * dry_air_mass_lbs_hr / 60.0f;
 
     // CHI Gating strictly evaluated off physical boil state
-    if (theo_grains > 100.0f && boil_achieved_ && !stasis_active_) {
+    if (theo_grains > 100.0f && boil_achieved_ && !stasis_active_ && std::isfinite(actual_grains) &&
+        std::isfinite(theo_grains) && std::isfinite(supply_flow_) && supply_flow_ > 0) {
+      chi_eligible_ = true;
       chi_instant_ = actual_grains / theo_grains;
       chi_instant_ = std::max(0.0f, std::min(2.0f, chi_instant_));
       chi_ema_ = (CHI_ALPHA * chi_instant_) + ((1.0f - CHI_ALPHA) * chi_ema_);
@@ -1046,9 +1099,11 @@ void HapsicController::run_diagnostics() {
 
       int bin_idx = boiler_curve_bin_idx(steam_voltage_);
       if (bin_idx >= 0 && actual_lbs_hr > 0.0f) {
-        boiler_curve_[bin_idx] =
-            (BOILER_CURVE_ALPHA * actual_lbs_hr) + ((1.0f - BOILER_CURVE_ALPHA) * boiler_curve_[bin_idx]);
-        boiler_curve_counts_[bin_idx]++;
+        uint32_t count = boiler_curve_counts_[bin_idx];
+        float alpha = count < BOILER_CURVE_MIN_SAMPLES ? 1.0f / (count + 1) : BOILER_CURVE_ALPHA;
+        boiler_curve_[bin_idx] += alpha * (actual_lbs_hr - boiler_curve_[bin_idx]);
+        if (count < UINT32_MAX)
+          boiler_curve_counts_[bin_idx]++;
       }
     }
   } else {
@@ -1059,21 +1114,12 @@ void HapsicController::run_diagnostics() {
   nvs_persist_counter_++;
   if (nvs_persist_counter_ >= NVS_PERSIST_TICKS) {
     nvs_persist_counter_ = 0;
-    HapsicPersist data;
-    data.chi_ema = chi_ema_;
-    data.cached_target_rh = cached_target_dp_;  // Mapping DP into legacy struct slot
-    for (int i = 0; i < BOILER_CURVE_BINS; i++) {
-      data.boiler_curve[i] = boiler_curve_[i];
-    }
-    data.magic = 0xABCD1235;
-    pref_.save(&data);
-    ESP_LOGD("hapsic", "NVS persisted: CHI=%.4f, target_dp=%.1f, curve=[%.3f,%.3f,%.3f,%.3f]", chi_ema_,
-             cached_target_dp_, boiler_curve_[0], boiler_curve_[1], boiler_curve_[2], boiler_curve_[3]);
+    checkpoint_learning();
   }
 }
 
 void HapsicController::update_economy_advisory() {
-  float dry_air_kg_hr = std::max(0.0f, supply_flow_) * RHO;
+  float dry_air_kg_hr = std::max(0.0f, supply_flow_) * 0.5886f * 60.0f * RHO_IMP * 0.453592f;
   float outdoor_delta_g_kg = outdoor_w_ - room_w_;
   float passive_import_kg_hr = dry_air_kg_hr * std::max(0.0f, outdoor_delta_g_kg) / 1000.0f;
   float passive_export_kg_hr = dry_air_kg_hr * std::max(0.0f, -outdoor_delta_g_kg) / 1000.0f;
@@ -1081,7 +1127,7 @@ void HapsicController::update_economy_advisory() {
   economy_passive_export_lbs_hr_ = passive_export_kg_hr * 2.20462f;
 
   bool active_steam = fsm_state_ == ACTIVE_CRUISE || fsm_state_ == ACTIVE_TURBO || fsm_state_ == TURBO_PENDING ||
-                      steam_voltage_ > 0.1f || steam_mass_kg_hr_ > 0.05f;
+                      steam_voltage_ > 0.1f || steam_mass_kg_hr_ / 0.453592f > 0.05f;
   float room_deficit = target_room_dp_ - room_dp_;
   bool useful_demand = room_deficit > 0.2f;
   economy_steaming_active_ = active_steam;
@@ -1154,7 +1200,7 @@ float HapsicController::voltage_for_steam_rate(float target_lbs_hr) {
 
   if (!any_trained) {
     // Fallback: linear nameplate model
-    return std::min(9.5f, (target_lbs_hr / max_capacity_) * 10.0f);
+    return std::min(9.5f, (target_lbs_hr / (max_capacity_ / 0.453592f)) * 10.0f);
   }
 
   // Walk bins low→high to find where target falls
@@ -1198,7 +1244,7 @@ float HapsicController::get_effective_max_capacity() {
   }
   if (best > 0.0f)
     return best;
-  return max_capacity_ * chi_ema_;
+  return (max_capacity_ / 0.453592f) * chi_ema_;
 }
 
 // =============================================================================
@@ -1206,6 +1252,11 @@ float HapsicController::get_effective_max_capacity() {
 // =============================================================================
 
 void HapsicController::publish_telemetry() {
+  steam_mass_kg_hr_ = steam_voltage_ / 10.0f * max_capacity_;
+  if (fsm_state_ == FAULT)
+    boil_status_ = "UNKNOWN";
+  else if (steam_voltage_ <= 0)
+    boil_status_ = "COLD";
   if (fsm_text_)
     fsm_text_->publish_state(state_name(fsm_state_));
   if (fault_text_)
@@ -1279,16 +1330,16 @@ void HapsicController::publish_telemetry() {
   if (tel_health_chi_ema_)
     tel_health_chi_ema_->publish_state(chi_ema_);
   if (tel_health_chi_instant_)
-    tel_health_chi_instant_->publish_state(chi_instant_);
+    tel_health_chi_instant_->publish_state(chi_eligible_ ? chi_instant_ : NAN);
   if (tel_health_effective_max_)
     tel_health_effective_max_->publish_state(get_effective_max_capacity());
   if (tel_health_measured_steam_)
-    tel_health_measured_steam_->publish_state(last_measured_steam_);
+    tel_health_measured_steam_->publish_state(chi_eligible_ ? last_measured_steam_ : NAN);
   if (tel_health_production_efficiency_) {
     float eff = 0.0f;
-    if (steam_mass_kg_hr_ > 0.1f && last_measured_steam_ > 0.0f)
-      eff = (last_measured_steam_ / steam_mass_kg_hr_) * 100.0f;
-    tel_health_production_efficiency_->publish_state(eff);
+    if (steam_mass_kg_hr_ / 0.453592f > 0.1f && last_measured_steam_ > 0.0f)
+      eff = (last_measured_steam_ / (steam_mass_kg_hr_ / 0.453592f)) * 100.0f;
+    tel_health_production_efficiency_->publish_state(chi_eligible_ ? eff : NAN);
   }
   if (tel_health_boil_status_)
     tel_health_boil_status_->publish_state(boil_status_);
@@ -1305,57 +1356,7 @@ void HapsicController::publish_telemetry() {
   if (tel_limiters_active_limit_)
     tel_limiters_active_limit_->publish_state(active_limit_);
 
-  float prod_eff = 0.0f;
-  if (steam_mass_kg_hr_ > 0.1f && last_measured_steam_ > 0.0f)
-    prod_eff = (last_measured_steam_ / steam_mass_kg_hr_) * 100.0f;
-
-  char json[2560];
-  snprintf(json, sizeof(json),
-           "{"
-           "\"fsm\":{\"state\":\"%s\",\"fault_reason\":\"%s\"},"
-           "\"feasibility\":{\"max_achievable_dp\":%.2f,\"is_infeasible\":%s,"
-           "\"total_loss_cfm\":%.2f},"
-           "\"loop_a\":{\"sp_user_target\":%.2f,\"pv_room_dp\":%.2f,\"error\":%"
-           ".2f,\"p_term\":%.2f,\"i_term\":%.2f,\"integrator\":%.2f,\"is_"
-           "frozen\":%s,\"output_target\":%.2f},"
-           "\"loop_b\":{\"sp_duct_target\":%.2f,\"pv_duct_dp\":%.2f,\"error\":%"
-           ".2f,\"v_ff\":%.2f,\"p_term\":%.2f,\"i_term\":%.2f,\"integrator\":%."
-           "2f,\"is_frozen\":%s,\"ideal_voltage\":%.2f},"
-           "\"batch\":{\"boil_achieved\":%s,\"stasis_active\":%s,\"stasis_"
-           "timer_sec\":%d,\"zero_volt_ticks\":%u},"
-           "\"limiters\":{\"ceiling_volts\":%.2f,\"active_limit\":\"%s\"},"
-           "\"physics\":{\"duct_derivative\":%.2f,\"structure_velocity\":%.2f},"
-           "\"psychrometrics\":{\"pre_steam_dp\":%.2f,\"outdoor_dp\":%.2f,"
-           "\"duct_rh_ema\":%.2f,\"duct_temp_fallback_active\":%s},"
-           "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
-           "\"advisory\":{\"economy_active\":%s,\"economy_severe\":%s,"
-           "\"steaming_active\":%s,\"useful_demand\":%s,"
-           "\"passive_import_candidate\":%s,\"passive_import_lbs_hr\":%.3f,"
-           "\"passive_export_lbs_hr\":%.3f,"
-           "\"economy_reason\":\"%s\",\"negative_net_minutes\":%.1f,"
-           "\"severe_negative_minutes\":%.1f,\"recovery_minutes\":%.1f,"
-           "\"suggested_target_delta\":%.1f},"
-           "\"health\":{\"chi_ratio\":%.4f,\"chi_ema\":%.4f,"
-           "\"boil_status\":\"%s\",\"effective_max_capacity\":%.3f,"
-           "\"measured_steam_lbs_hr\":%.3f,\"production_efficiency\":%.1f,"
-           "\"boiler_curve\":[%.3f,%.3f,%.3f,%.3f],"
-           "\"boiler_curve_samples\":[%d,%d,%d,%d]}"
-           "}",
-           state_name(fsm_state_), fault_reason_.c_str(), max_achievable_dp_, is_target_infeasible_ ? "true" : "false",
-           total_loss_cfm_, target_room_dp_, room_dp_, loop_a_error, loop_a_p_term, loop_a_i_term, integrator_a_,
-           "false", target_duct_dp_, target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term, loop_b_i_term,
-           integrator_b_, "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false",
-           stasis_timer_sec_, zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), duct_derivative_,
-           structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, duct_temp_fallback_active_ ? "true" : "false",
-           steam_voltage_, steam_mass_kg_hr_, economy_advisory_active_ ? "true" : "false",
-           economy_advisory_severe_ ? "true" : "false", economy_steaming_active_ ? "true" : "false",
-           economy_useful_demand_ ? "true" : "false", economy_passive_import_candidate_ ? "true" : "false",
-           economy_passive_import_lbs_hr_, economy_passive_export_lbs_hr_, economy_advisory_reason_.c_str(),
-           economy_negative_streak_sec_ / 60.0f, economy_severe_streak_sec_ / 60.0f,
-           economy_recovery_streak_sec_ / 60.0f, economy_advisory_target_delta_, 1.0f, chi_ema_, boil_status_.c_str(),
-           get_effective_max_capacity(), last_measured_steam_, prod_eff, boiler_curve_[0], boiler_curve_[1],
-           boiler_curve_[2], boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1],
-           boiler_curve_counts_[2], boiler_curve_counts_[3]);
+  std::string json = legacy_telemetry_json();
 
 #ifdef USE_MQTT
   if (mqtt::global_mqtt_client != nullptr) {
@@ -1370,6 +1371,109 @@ void HapsicController::publish_telemetry() {
   if (tick_counter_ % 2 == 0) {
     publish_terminal_heartbeat();
   }
+}
+
+std::string HapsicController::legacy_telemetry_json() {
+  steam_mass_kg_hr_ = steam_voltage_ / 10.0f * max_capacity_;
+  if (fsm_state_ == FAULT)
+    boil_status_ = "UNKNOWN";
+  else if (steam_voltage_ <= 0)
+    boil_status_ = "COLD";
+  auto numeric = [](float value) {
+    if (!std::isfinite(value))
+      return std::string("null");
+    char text[48];
+    snprintf(text, sizeof(text), "%.6f", value);
+    return std::string(text);
+  };
+  std::string loss = numeric(vent_loss_), flux = numeric(net_flux_);
+  std::string ratio = chi_eligible_ ? numeric(chi_instant_) : "null";
+  std::string measured = chi_eligible_ ? numeric(last_measured_steam_) : "null";
+  float loop_a_error = target_room_dp_ - room_dp_;
+  float KP_A = kp_a_number_ ? kp_a_number_->state : 2.0f;
+  float KI_A = ki_a_number_ ? ki_a_number_->state : 0.1f;
+  float loop_a_p_term = KP_A * loop_a_error;
+  float loop_a_i_term = KI_A * integrator_a_;
+
+  float loop_b_error = target_duct_dp_ - duct_dp_;
+  if (std::abs(loop_b_error) < DEADBAND)
+    loop_b_error = 0.0f;
+  float KP_B = kp_b_number_ ? kp_b_number_->state : 0.1f;
+  float KI_B = ki_b_number_ ? ki_b_number_->state : 0.02f;
+  float loop_b_p_term = KP_B * loop_b_error;
+  float loop_b_i_term = KI_B * integrator_b_;
+
+  float prod_eff = 0.0f;
+  if (steam_mass_kg_hr_ / 0.453592f > 0.1f && last_measured_steam_ > 0.0f)
+    prod_eff = (last_measured_steam_ / (steam_mass_kg_hr_ / 0.453592f)) * 100.0f;
+
+  if (!chi_eligible_)
+    prod_eff = NAN;
+  char json[2560];
+  int length = snprintf(
+      json, sizeof(json),
+      "{"
+      "\"fsm\":{\"state\":\"%s\",\"fault_reason\":\"%s\"},"
+      "\"feasibility\":{\"max_achievable_dp\":%.2f,\"is_infeasible\":%s,"
+      "\"total_loss_cfm\":%.2f},"
+      "\"loop_a\":{\"sp_user_target\":%.2f,\"pv_room_dp\":%.2f,\"error\":%"
+      ".2f,\"p_term\":%.2f,\"i_term\":%.2f,\"integrator\":%.2f,\"is_"
+      "frozen\":%s,\"output_target\":%.2f},"
+      "\"loop_b\":{\"sp_duct_target\":%.2f,\"pv_duct_dp\":%.2f,\"error\":%"
+      ".2f,\"v_ff\":%.2f,\"p_term\":%.2f,\"i_term\":%.2f,\"integrator\":%."
+      "2f,\"is_frozen\":%s,\"ideal_voltage\":%.2f},"
+      "\"batch\":{\"boil_achieved\":%s,\"stasis_active\":%s,\"stasis_"
+      "timer_sec\":%d,\"zero_volt_ticks\":%u},"
+      "\"limiters\":{\"ceiling_volts\":%.2f,\"active_limit\":\"%s\"},"
+      "\"physics\":{\"loss_vent\":%s,\"flux_net\":%s,\"duct_derivative\":%.2f,\"structure_velocity\":%.2f},"
+      "\"psychrometrics\":{\"pre_steam_dp\":%.2f,\"outdoor_dp\":%.2f,"
+      "\"duct_rh_ema\":%.2f,\"duct_temp_fallback_active\":%s},"
+      "\"io\":{\"volts_out\":%.2f,\"steam_mass_lbs\":%.3f},"
+      "\"advisory\":{\"economy_active\":%s,\"economy_severe\":%s,"
+      "\"steaming_active\":%s,\"useful_demand\":%s,"
+      "\"passive_import_candidate\":%s,\"passive_import_lbs_hr\":%.3f,"
+      "\"passive_export_lbs_hr\":%.3f,"
+      "\"economy_reason\":\"%s\",\"negative_net_minutes\":%.1f,"
+      "\"severe_negative_minutes\":%.1f,\"recovery_minutes\":%.1f,"
+      "\"suggested_target_delta\":%.1f},"
+      "\"health\":{\"math_revision\":2,\"chi_eligible\":%s,\"chi_ratio\":%s,\"chi_ema\":%.4f,"
+      "\"boil_status\":\"%s\",\"effective_max_capacity\":%.3f,"
+      "\"measured_steam_lbs_hr\":%s,\"production_efficiency\":%.1f,"
+      "\"boiler_curve\":[%.3f,%.3f,%.3f,%.3f],"
+      "\"boiler_curve_samples\":[%u,%u,%u,%u]}"
+      "}",
+      state_name(fsm_state_), fault_reason_.c_str(), max_achievable_dp_, is_target_infeasible_ ? "true" : "false",
+      total_loss_cfm_, target_room_dp_, room_dp_, loop_a_error, loop_a_p_term, loop_a_i_term, integrator_a_, "false",
+      target_duct_dp_, target_duct_dp_, duct_dp_, loop_b_error, v_ff_, loop_b_p_term, loop_b_i_term, integrator_b_,
+      "false", ideal_voltage_, boil_achieved_ ? "true" : "false", stasis_active_ ? "true" : "false", stasis_timer_sec_,
+      zero_volt_ticks_, ceiling_volts_, active_limit_.c_str(), loss.c_str(), flux.c_str(), duct_derivative_,
+      structure_velocity_, supply_dp_, outdoor_dp_, duct_rh_, duct_temp_fallback_active_ ? "true" : "false",
+      steam_voltage_, steam_mass_kg_hr_ / 0.453592f, economy_advisory_active_ ? "true" : "false",
+      economy_advisory_severe_ ? "true" : "false", economy_steaming_active_ ? "true" : "false",
+      economy_useful_demand_ ? "true" : "false", economy_passive_import_candidate_ ? "true" : "false",
+      economy_passive_import_lbs_hr_, economy_passive_export_lbs_hr_, economy_advisory_reason_.c_str(),
+      economy_negative_streak_sec_ / 60.0f, economy_severe_streak_sec_ / 60.0f, economy_recovery_streak_sec_ / 60.0f,
+      economy_advisory_target_delta_, chi_eligible_ ? "true" : "false", ratio.c_str(), chi_ema_, boil_status_.c_str(),
+      get_effective_max_capacity(), measured.c_str(), prod_eff, boiler_curve_[0], boiler_curve_[1], boiler_curve_[2],
+      boiler_curve_[3], boiler_curve_counts_[0], boiler_curve_counts_[1], boiler_curve_counts_[2],
+      boiler_curve_counts_[3]);
+
+  if (length < 0 || static_cast<size_t>(length) >= sizeof(json))
+    return "{}";
+  // snprintf spells nonfinite floats as nan/inf, which JSON does not permit.
+  std::string result(json);
+  for (const std::string token : {"-nan", "nan", "-inf", "inf"}) {
+    size_t at = 0;
+    while ((at = result.find(token, at)) != std::string::npos) {
+      bool left = at > 0 && (result[at - 1] == ':' || result[at - 1] == '[' || result[at - 1] == ',');
+      size_t end = at + token.size();
+      bool right = end < result.size() && (result[end] == ',' || result[end] == '}' || result[end] == ']');
+      if (left && right)
+        result.replace(at, token.size(), "null");
+      at += 4;
+    }
+  }
+  return result;
 }
 
 void HapsicController::publish_terminal_heartbeat() {

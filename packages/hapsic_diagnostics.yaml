@@ -1,0 +1,206 @@
+# HAPSIC diagnostic schema 1. Legacy controller entities retain their meanings.
+mqtt:
+  sensor:
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Diagnostics Producer
+      unique_id: hapsic_diagnostics_producer
+      value_template: '{{ value_json.producer_id }}'
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Estimated Steam Delivery
+      unique_id: hapsic_estimated_steam_delivery
+      value_template: '{{ value_json.measurement.corrected_kg_h }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.measurement | to_json }}'
+      unit_of_measurement: kg/h
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Estimated Steam Delivery Imperial
+      unique_id: hapsic_estimated_steam_delivery_imperial
+      value_template: '{{ value_json.measurement.corrected_kg_h / 0.45359237 if value_json.measurement.corrected_kg_h is not
+        none else none }}'
+      unit_of_measurement: lb/h
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Raw Steam Delivery
+      unique_id: hapsic_raw_steam_delivery
+      value_template: '{{ value_json.measurement.raw_kg_h }}'
+      unit_of_measurement: kg/h
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Delivery Performance
+      unique_id: hapsic_delivery_performance
+      value_template: '{{ value_json.delivery.value }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.delivery | to_json }}'
+      unit_of_measurement: '%'
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Canister Performance
+      unique_id: hapsic_canister_performance
+      value_template: '{{ value_json.canister.value }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.canister | to_json }}'
+      unit_of_measurement: '%'
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Measurement Status
+      unique_id: hapsic_measurement_status
+      value_template: '{{ value_json.measurement.status }}'
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Diagnostic Calibration
+      unique_id: hapsic_diagnostic_calibration
+      value_template: '{{ value_json.calibration.status }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.calibration | to_json }}'
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Diagnostic Qualification
+      unique_id: hapsic_diagnostic_qualification
+      value_template: '{{ value_json.qualification.reason }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.qualification | to_json }}'
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Performance Alert
+      unique_id: hapsic_performance_alert
+      value_template: '{{ value_json.alert.decision }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ dict(value_json.alert, producer_id=value_json.producer_id, generation=value_json.generation,
+        reference_id=value_json.calibration.reference_id) | to_json }}'
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Canister Evidence Hours
+      unique_id: hapsic_canister_evidence_hours
+      value_template: '{{ value_json.canister.seconds / 3600 }}'
+      unit_of_measurement: h
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Diagnostic Evidence Age
+      unique_id: hapsic_diagnostic_evidence_age
+      value_template: '{{ value_json.published_at - value_json.canister.last_observed_at if value_json.canister.last_observed_at
+        is defined and value_json.canister.last_observed_at is not none and value_json.clock_valid else none }}'
+      unit_of_measurement: s
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Last Observed Delivery Performance
+      unique_id: hapsic_last_valid_delivery_performance
+      value_template: '{{ value_json.last_valid.delivery.value if value_json.last_valid.delivery is defined else none }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.last_valid.delivery | to_json if value_json.last_valid.delivery is defined else dict(status="unavailable") | to_json }}'
+      unit_of_measurement: '%'
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Last Observed Delivery Age
+      unique_id: hapsic_last_valid_delivery_age
+      value_template: '{{ value_json.published_at - value_json.last_valid.delivery.at if value_json.last_valid.delivery is
+        defined and value_json.last_valid.delivery.at is not none and value_json.clock_valid else none }}'
+      unit_of_measurement: s
+      state_class: measurement
+    - state_topic: hapsic/telemetry/diagnostics
+      availability_topic: hapsic/telemetry/diagnostics
+      availability_template: '{{ ''online'' if value_json.schema_version == 1 and value_json.producer_id == ''hapsic-python''
+        else ''offline'' }}'
+      expire_after: 30
+      name: HAPSIC Diagnostic Exclusions
+      unique_id: hapsic_diagnostic_exclusions
+      value_template: '{{ value_json.qualification.reason }}'
+      json_attributes_topic: hapsic/telemetry/diagnostics
+      json_attributes_template: '{{ value_json.exclusions | to_json }}'
+input_text:
+  hapsic_last_performance_alert_episode:
+    name: HAPSIC Last Notified Performance Episode
+    max: 255
+script:
+  hapsic_diagnostic_action:
+    alias: 'Maintenance: HAPSIC - Manage Diagnostic Calibration'
+    mode: queued
+    max: 4
+    description: Review candidate metadata before acceptance. These actions affect diagnostic calibration only.
+    fields:
+      diagnostic_action:
+        name: Action
+        required: true
+        selector:
+          select:
+            options:
+              - baseline_start
+              - reference_start
+              - baseline_accept
+              - reference_accept
+              - cancel
+              - baseline_reset
+              - reference_reset
+      candidate_revision:
+        name: Candidate revision for acceptance
+        selector:
+          number:
+            min: 1
+            max: 2147483647
+            step: 1
+            mode: box
+      owner_confirmed_healthy:
+        name: Owner confirms a healthy canister for reference collection
+        default: false
+        selector:
+          boolean:
+    sequence:
+      - action: mqtt.publish
+        data:
+          topic: hapsic/telemetry/diagnostics/command
+          retain: false
+          payload: '{{ dict(schema_version=1, producer_id=''hapsic-python'', request_id=context.id, issued_at=as_timestamp(utcnow()),
+            action=diagnostic_action, revision=candidate_revision | default(none), healthy=owner_confirmed_healthy | default(false))
+            | to_json }}'

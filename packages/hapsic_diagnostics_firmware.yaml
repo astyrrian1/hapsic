@@ -1,0 +1,32 @@
+# Diagnostic inputs are deliberately independent of controller fallback bindings.
+# Each reporting_verified flag stays false until its physical reporting contract
+# and sensor identity/location have been commissioned.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [hapsic_diagnostics]
+
+time:
+  - platform: homeassistant
+    id: diagnostic_clock
+    timezone: UTC
+
+hapsic_diagnostics:
+  controller: hapsic_controller_core
+  clock: diagnostic_clock
+  producer_id: ${diagnostic_producer}
+  topic: ${diagnostic_topic}
+  airflow_verified: false
+  # Atomic raw-source MQTT relay preserves source timestamps and report IDs.
+  # Neither HA reconnects nor unchanged polling creates independent reports.
+  input_topic: hapsic/telemetry/diagnostics/inputs
+  input_producer: hapsic-python
+  command_source: production
+  sources:
+    - source_id: sensor.zehnder_comfoair_q_a4cb9c_supply_air_temperature
+    - source_id: sensor.zehnder_comfoair_q_a4cb9c_supply_air_humidity
+    - source_id: sensor.shelly0110dimg3_28372f3e866c_temperature_2
+    - source_id: sensor.shelly0110dimg3_28372f3e866c_input_100_analog
+    - source_id: sensor.zehnder_comfoair_q_a4cb9c_supply_fan_flow
+    - source_id: sensor.gw1200b_absolute_pressure

@@ -2,3 +2,18 @@
 hapsic_main:
   module: hapsic_controller
   class: HapsicController
+
+# Independent observer: never changes controller helpers or actuator outputs.
+# Configure reporting contracts and accuracy only after commissioning; defaults
+# deliberately publish unavailable/provisional diagnostics without learning.
+hapsic_diagnostics:
+  module: hapsic_controller
+  class: HapsicDiagnostics
+  pin_app: true
+  producer_id: hapsic-python
+  mqtt_namespace: mqtt
+  data_path: /config/hapsic-data/diagnostics-v1.json
+  clock_verified: false
+  diagnostic_config:
+    reporting_verified: false
+    airflow_basis: unverified

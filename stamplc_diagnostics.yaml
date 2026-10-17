@@ -1,0 +1,19 @@
+# Compile-only diagnostic firmware variant. Initial installation requires a
+# reviewed USB flash because the NVS/OTA partition layout differs. Do not OTA
+# this partition change onto an existing unit.
+substitutions:
+  diagnostic_producer: hapsic-firmware
+  diagnostic_topic: hapsic/telemetry/diagnostics
+
+packages:
+  controller: !include stamplc.yaml
+  diagnostics: !include packages/hapsic_diagnostics_firmware.yaml
+
+esp32:
+  partitions: diagnostic-partitions.csv
+
+hapsic_diagnostics:
+  command_source: local
+
+esphome:
+  build_path: .esphome/build/hapsic-production-diagnostics
