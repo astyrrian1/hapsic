@@ -5,6 +5,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.8.0] — 2026-10-17
+
 ### Legacy control and telemetry repairs
 
 - Correct C++ g/kg/grains and kg/lb boundaries throughout legacy delivery, losses,
@@ -17,6 +19,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
   exposed pre-existing over/undershoot that the repaired model encountered more often.
 - Replace weak offline parity with deterministic actual-controller replay, including
   private real-history verification, counted restart and real adapter fault isolation.
+- Keep Mission Control's learned-curve card compatible with both old arrays and
+  the counted versioned record, show actual training counts, and correct the voltage
+  bands and lb/hr label.
 
 
 ### Added
@@ -31,6 +36,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### Commissioning
 - Sensor reporting/scaling/flow contracts, held-out baseline, owner-confirmed reference, timing/rollback and >=24 h/three natural cycles remain required. Defaults do not manufacture a calibrated result. See docs/delivery-diagnostics.md.
+
+### Deployment Notes
+After installing this release through HACS:
+1. Restart AppDaemon to load the updated controller and learning migration.
+2. Update the Home Assistant HAPSIC package and Mission Control dashboard from this release so the new counted curve record renders correctly.
+3. Firmware compilation and flashing remain separate; HACS does not update installed ESP32 firmware.
 
 ## [v2.7.4] — 2026-05-22
 
