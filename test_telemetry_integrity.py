@@ -66,7 +66,7 @@ def load_controller():
     return module
 
 
-def test_telemetry_schema_integrity():
+def check_telemetry_schema_integrity():
     """
     Rigorously validates that the publish_telemetry method correctly maps
     internal state attributes to the MQTT JSON payload without silent fallbacks.
@@ -216,6 +216,10 @@ def test_telemetry_schema_integrity():
     return True
 
 
+def test_telemetry_schema_integrity():
+    assert check_telemetry_schema_integrity()
+
+
 def test_passive_import_advisory_math():
     """Validates observe-only outdoor moisture import telemetry."""
     module = load_controller()
@@ -247,7 +251,7 @@ if __name__ == "__main__":
     print("  HAPSIC Telemetry Integrity Tests")
     print("=" * 60)
 
-    success = test_telemetry_schema_integrity()
+    success = check_telemetry_schema_integrity()
 
     print("\n  TOTAL: 1/1 passed" if success else "\n  TOTAL: 0/1 passed")
     if not success:

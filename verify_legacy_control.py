@@ -47,15 +47,24 @@ def build(binary, baseline=None):
 
 
 def verify(binary):
-    data = json.loads(
-        subprocess.check_output([str(binary)], text=True),
-        parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
-    )
+    def payload(*arguments):
+        return json.loads(
+            subprocess.check_output([str(binary), *arguments], text=True),
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        )
+
+    data = payload()
     assert data["health"]["chi_ratio"] != 1
     assert data["health"]["chi_eligible"] is True
     assert data["health"]["math_revision"] == 2
     assert data["io"]["steam_mass_lbs"] > 4
     assert data["physics"]["flux_net"] is not None
+    invalid = payload("nonfinite")
+    assert invalid["health"]["chi_ratio"] is None
+    assert invalid["health"]["boiler_curve"][0] is None
+    assert invalid["physics"]["loss_vent"] is None
+    assert invalid["physics"]["flux_net"] is None
+    assert payload("overflow") == {}  # No truncated/invalid JSON is published.
 
 
 def main():

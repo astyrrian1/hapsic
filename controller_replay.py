@@ -326,6 +326,7 @@ def main():
                          "components/hapsic/hapsic.h", "controller_replay.py", "tests/legacy_replay_native.cpp")
         },
         native_binary_sha256=hashlib.sha256(args.binary.read_bytes()).hexdigest(),
+        baseline_native_binary_sha256=hashlib.sha256(args.baseline_binary.read_bytes()).hexdigest(),
         recorded_producer_revision=manifest.get("producer_revision", "not recorded; no exact incident replay claimed"),
         ha_version=manifest.get("ha_version", "synthetic"),
         initial_state="constructed fresh/migrated boot; filters and integrators reset",

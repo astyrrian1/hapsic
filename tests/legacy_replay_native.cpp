@@ -104,7 +104,7 @@ class CaptureOutput : public esphome::output::FloatOutput {
     last = value;
   }
 };
-int main(int argc, char **) {
+int main(int argc, char **argv) {
   using namespace esphome;
   MemoryPreferences storage;
   global_preferences = &storage;
@@ -242,6 +242,19 @@ int main(int argc, char **) {
   c.steam_voltage_ = 9.5f;
   c.duct_rh_ = 60;
   c.run_diagnostics();
+  if (argc > 1 && std::string(argv[1]) == "nonfinite") {
+    c.vent_loss_ = NAN;
+    c.net_flux_ = INFINITY;
+    c.chi_instant_ = NAN;
+    c.boiler_curve_[0] = INFINITY;
+    std::cout << c.legacy_telemetry_json() << std::endl;
+    return 0;
+  }
+  if (argc > 1 && std::string(argv[1]) == "overflow") {
+    c.fault_reason_ = std::string(4000, 'x');
+    std::cout << c.legacy_telemetry_json() << std::endl;
+    return 0;
+  }
   if (argc == 1) {
     std::cout << c.legacy_telemetry_json() << std::endl;
     return 0;
