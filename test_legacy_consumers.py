@@ -90,12 +90,13 @@ def render_boiler_curve(helper_value):
 
     def from_json(value, default=None):
         try:
-            return json.loads(value)
+            decoded = json.loads(value)
+            json.dumps(decoded, allow_nan=False)
+            return decoded
         except (TypeError, ValueError):
             return default
 
     environment.filters["from_json"] = from_json
-    environment.tests["number"] = is_number
     return environment.from_string(card["content"]).render(
         states=lambda _entity_id: helper_value
     )
@@ -193,14 +194,17 @@ def test_mission_control_renders_legacy_and_counted_learning_records(record, exp
     assert "4-6V" in rendered_card
 
 
-@pytest.mark.parametrize("record", ["", "not-json", "{\"v\":2,\"curve\":[1],\"counts\":[]}"])
+@pytest.mark.parametrize(
+    "record",
+    ["", "not-json", '{"v":2,"curve":[NaN,2,3,4]}', '{"v":2,"curve":[1],"counts":[]}'],
+)
 def test_mission_control_falls_back_safely_for_malformed_learning_records(record):
     rendered_card = render_boiler_curve(record)
     assert "| **Capacity (lb/hr)** | 0.00 | 0.00 | 0.00 | 0.00 |" in rendered_card
 
 
-def test_mission_control_handles_nonfinite_and_malformed_bins_without_template_errors():
-    record = '{"v":2,"curve":[NaN,2,"bad",4],"counts":[1,2,"bad",4]}'
+def test_mission_control_handles_malformed_bins_without_template_errors():
+    record = '{"v":2,"curve":[null,2,"bad",4],"counts":[1,2,"bad",4]}'
     rendered_card = render_boiler_curve(record)
     assert "| **Capacity (lb/hr)** | 0.00 | 2.00 | 0.00 | 4.00 |" in rendered_card
     assert "| **Samples** | 1 | 2 | — | 4 |" in rendered_card
