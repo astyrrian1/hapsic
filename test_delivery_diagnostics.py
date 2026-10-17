@@ -4,10 +4,10 @@ import copy
 import json
 import math
 
+import hapsic_controller as controller
 import pytest
 
 import conftest  # noqa: F401
-import hapsic_controller as controller
 
 
 def sample(value, unit, now=1000, *, accuracy=None):
@@ -41,7 +41,7 @@ def test_psychrolib_known_point_and_signed_delivery():
     observer = engine()
     measured = observer.measure(inputs(downstream_rh=50), 1000)
     # ASHRAE/PsychroLib SI reference at 20 C, 101325 Pa; 200 m3/h upstream.
-    assert measured["raw_kg_h"] == pytest.approx(0.6978, abs=0.002)
+    assert measured["raw_kg_h"] == pytest.approx(0.6995387620211214, rel=1e-9)
     negative = observer.measure(inputs(downstream_rh=20), 1000)
     assert negative["raw_kg_h"] < 0
     assert measured["uncertainty_kg_h"] is None
@@ -224,3 +224,115 @@ def test_persistence_restores_committed_evidence_but_not_continuity(tmp_path):
     assert result["qualification"]["reason"] == "WARMUP"
     path.write_text('{"schema_version":999}')
     with pytest.raises(ValueError): restored.restore(store.load())
+
+
+def test_diagnostic_app_has_no_actuator_calls_on_tick_or_failure(tmp_path):
+    assert hasattr(controller, "HapsicDiagnostics"), "Independent AppDaemon application is missing"
+    from unittest.mock import MagicMock
+
+    app = controller.HapsicDiagnostics()
+    app.args = {"data_path": str(tmp_path / "diagnostics.json")}
+    app.call_service = MagicMock()
+    app.listen_event = MagicMock()
+    app.get_state = MagicMock(return_value=None)
+    app.initialize()
+    app.diagnostic_tick({})
+    assert app.call_service.call_count > 0
+    assert {call.args[0] for call in app.call_service.call_args_list} <= {"mqtt/publish", "mqtt/subscribe"}
+    app.observer.observe = MagicMock(side_effect=RuntimeError("Injected observer failure"))
+    app.diagnostic_tick({})
+    assert {call.args[0] for call in app.call_service.call_args_list} <= {"mqtt/publish", "mqtt/subscribe"}
+    app.terminate()
+
+
+def test_fault_and_interruption_between_physical_samples_break_qualification():
+    observer = engine()
+    advance(observer, 1000, 1300, 9.5)
+    before = observer.qualified_seconds
+    values = inputs(2300, 0)
+    observer.observe(values, 2301, 2301, synced=True)
+    assert len(observer.window) <= 1  # A new off-period window may start immediately.
+    assert observer.qualified_seconds == 0 <= before
+
+
+def test_unsynchronized_future_clock_cannot_delete_retained_evidence():
+    observer, now = commissioned()
+    now, _ = reference_cycle(observer, now)
+    before = copy.deepcopy(list(observer.evidence))
+    observer.observe(inputs(now), now, now + 20 * 86400, synced=False)
+    assert list(observer.evidence) == before
+
+
+def test_corrupt_storage_is_rejected_without_partial_installation():
+    observer, _ = commissioned()
+    state = observer.export_state()
+    state["baseline"]["offset"] = "corrupt"
+    target = engine()
+    with pytest.raises(ValueError): target.restore(state)
+    assert target.baseline is None and target.reference is None
+
+
+def test_source_identity_changes_invalidate_calibration():
+    observer = engine()
+    now = commission_baseline(observer)
+    values = inputs(now, 9.5)
+    values["upstream_rh"]["source"] = "replacement-physical-sensor"
+    result = observer.observe(values, now, now, synced=True)
+    assert observer.baseline is None
+    assert result["qualification"]["reason"] == "SOURCE_IDENTITY_CHANGED"
+
+
+def test_restarts_cannot_manufacture_separate_baseline_off_periods():
+    observer = engine()
+    observer.command("baseline_start")
+    now = 1000
+    for _ in range(4):
+        advance(observer, now, 1505)
+        restored = engine()
+        restored.restore(observer.export_state())
+        observer = restored
+        now += 1510
+    assert len(observer.review()["windows"]) == 1
+    assert observer.review()["ready"] is False
+
+
+def test_restart_quarantines_future_evidence():
+    observer, now = commissioned()
+    now, _ = reference_cycle(observer, now)
+    restored = engine()
+    restored.restore(observer.export_state())
+    result = restored.observe(inputs(now - 1000), now + 5, now - 1000, synced=True)
+    assert result["canister"]["value"] is None
+    assert result["alert"]["decision"] == "inconclusive"
+
+
+def test_return_to_envelope_does_not_credit_previous_outside_measurement():
+    observer, now = commissioned()
+    now, _ = reference_cycle(observer, now)
+    outside = inputs(now, 9.5)
+    outside["upstream_t"]["value"] = 20.01
+    observer.observe(outside, now, now, synced=True)
+    observer.observe(inputs(now + 5, 9.5), now + 5, now + 5, synced=True)
+    assert not observer.delivery_window
+
+
+def test_ack_transport_failure_cannot_reject_a_durable_action(tmp_path):
+    from concurrent.futures import Future
+    from unittest.mock import MagicMock
+
+    app = controller.HapsicDiagnostics()
+    app.args = {"data_path": str(tmp_path / "state.json")}
+    app.call_service = MagicMock()
+    app.listen_event = MagicMock()
+    app.initialize()
+    replacement = engine()
+    replacement.command("baseline_start")
+    future = Future()
+    future.set_result(None)
+    app.pending_save = (future, replacement, {"request_id": "durable-action"})
+    app._publish = MagicMock(side_effect=RuntimeError("MQTT disconnected"))
+    app._save_completed()
+    assert app.observer is replacement
+    assert app.storage_error is None
+    assert app._publish.call_args.args[1]["status"] == "accepted"
+    app.terminate()
