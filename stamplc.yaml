@@ -19,7 +19,7 @@ esphome:
     board_build.flash_mode: dio
     lib_deps:
       - m5stack/M5Unified@0.2.13
-      - m5stack/M5GFX@0.2.19
+      - M5GFX=https://github.com/m5stack/M5GFX.git#53a7184601f3667b030ba141c58b87ce2acfaa2a
     build_flags:
       - -DARDUINO_M5STACK_STAMPLC
       - -DARDUINO_USB_CDC_ON_BOOT=1
@@ -433,6 +433,7 @@ text_sensor:
 # =============================================================================
 
 hapsic:
+  id: hapsic_controller_core
   duct_temp_sensor: duct_temp_ds18b20
   duct_rh_sensor: duct_rh_scaled
   supply_flow_sensor: supply_fan_flow

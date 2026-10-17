@@ -182,6 +182,10 @@ class HapsicController : public PollingComponent {
   // Max capacity (ESPHome sensor component)
   void set_max_capacity_sensor(sensor::Sensor *s) { max_capacity_sensor_ = s; }
 
+  // Read-only observation seam. Diagnostics never receive an actuator handle.
+  float diagnostic_commanded_voltage() const { return steam_voltage_; }
+  bool diagnostic_faulted() const { return fsm_state_ == FAULT; }
+
   // Manual reset (ESPHome button component)
   void set_manual_reset_button(button::Button *b) { manual_reset_button_ = b; }
 

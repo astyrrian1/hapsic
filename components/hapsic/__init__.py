@@ -145,7 +145,7 @@ async def to_code(config):
     # Register the M5StamPLC and display libraries for PlatformIO ONLY on physical hardware
     if CORE.is_esp32:
         cg.add_library("m5stack/M5Unified", "0.2.13")
-        cg.add_library("m5stack/M5GFX", "0.2.19")
+        cg.add_library("M5GFX", "0.2.19", "https://github.com/m5stack/M5GFX.git#53a7184601f3667b030ba141c58b87ce2acfaa2a")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
