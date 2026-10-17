@@ -375,7 +375,12 @@ class DiagnosticComponent : public PollingComponent {
       if (i == 6) {
         next.command_uncertain =
             !item["uncertain"].isNull() && (!item["uncertain"].is<bool>() || item["uncertain"].as<bool>());
-        remote_fault_ = !item["fault"].is<bool>() || item["fault"].as<bool>();
+        const std::string state = item["controller_state"].as<std::string>();
+        const std::array<std::string, 8> known_states{
+            "INITIALIZING", "STANDBY",        "ACTIVE_CRUISE", "TURBO_PENDING",
+            "ACTIVE_TURBO", "HYGIENIC_PURGE", "FAULT",         "MAINTENANCE_LOCKOUT"};
+        remote_fault_ = !item["fault"].is<bool>() || item["fault"].as<bool>() ||
+                        std::find(known_states.begin(), known_states.end(), state) == known_states.end();
         command_event(sample.value, remote_fault_);
       }
     }

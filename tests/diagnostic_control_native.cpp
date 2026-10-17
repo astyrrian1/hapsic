@@ -86,6 +86,7 @@ int main() {
   hapsic_diagnostics::Config config;
   config.verified = true;
   hapsic_diagnostics::Observer observer(config);
+  bool saw_fault = false;
   for (unsigned tick = 0; tick < 2000; tick++) {
     test_ms += 5000;
     rh.state = tick % 250 < 120 ? 25 : 45;
@@ -105,6 +106,7 @@ int main() {
     observer.observe(frame, utc, utc, tick % 17 != 0);
     if (tick % 19 == 0)
       assert(!observer.restore({1, 2, 3}));
+    saw_fault = saw_fault || plain.fsm_state_ == hapsic::HapsicController::FAULT;
     assert(plain.fsm_state_ == observed.fsm_state_);
     assert(plain.steam_voltage_ == observed.steam_voltage_ && plain.fan_voltage_ == observed.fan_voltage_);
     assert(plain.chi_ema_ == observed.chi_ema_);
@@ -113,6 +115,8 @@ int main() {
     assert(std::memcmp(plain.boiler_curve_counts_, observed.boiler_curve_counts_, sizeof(plain.boiler_curve_counts_)) ==
            0);
   }
+  assert(saw_fault);
+  assert(!steam_plain.calls.empty() && *std::max_element(steam_plain.calls.begin(), steam_plain.calls.end()) > 0);
   assert(steam_plain.calls == steam_observed.calls && fan_plain.calls == fan_observed.calls);
   std::cout
       << "2000 actual native controller ticks: actuator calls, FSM, integrators, CHI and learned curves identical\n";

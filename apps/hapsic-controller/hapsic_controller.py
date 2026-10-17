@@ -131,7 +131,7 @@ class DeliveryObserver:
     def measure(self, snapshot, now):
         try:
             values, errors, times, ids = [], [], [], []
-            verified = self.config["reporting_verified"] and self.config["airflow_basis"] == "actual_upstream"
+            verified = self.config["reporting_verified"] is True and self.config["airflow_basis"] == "actual_upstream"
             pressure_fallback = "pressure" not in snapshot
             for key in self.KEYS:
                 if key == "pressure" and pressure_fallback:
@@ -148,13 +148,14 @@ class DeliveryObserver:
                     raise ValueError("Stale or future source")
                 value, factor = self._convert(item["value"], item["unit"], key)
                 if key == "command":
-                    if not 0 <= value <= 10 or item.get("fault", False) or item.get("uncertain", False):
+                    if (not 0 <= value <= 10 or item.get("fault", False) or item.get("uncertain", False)
+                            or item.get("verified") is not True or not item.get("source")):
                         raise ValueError("Command unavailable or faulted")
                     continue
                 values.append(value)
                 accuracy = item.get("accuracy")
                 errors.append(abs(factor) * accuracy if self._finite(accuracy) and accuracy >= 0 else None)
-                verified = verified and item.get("verified", False) and bool(item.get("source"))
+                verified = verified and item.get("verified") is True and bool(item.get("source"))
                 if key in self.AIR_KEYS:
                     times.append(item["reported_at"])
                     ids.append(str(item["report_id"]))
@@ -249,7 +250,9 @@ class DeliveryObserver:
         if grouped: self.quarantined_evidence = list(grouped.values())
 
     def _clock(self, mono, utc, synced):
-        if self.last_mono is not None and mono <= self.last_mono: return False
+        if not self._finite(mono) or (self.last_mono is not None and mono <= self.last_mono): return False
+        step = (self.last_mono is not None and self._finite(utc) and self._finite(self.last_utc)
+                and abs((utc - self.last_utc) - (mono - self.last_mono)) > 5)
         self.last_mono = mono
         if not synced or not self._finite(utc):
             self.clock_valid = False
@@ -257,7 +260,7 @@ class DeliveryObserver:
         elif self.clock_anchor is None:
             self.clock_anchor = utc - mono
             self.clock_valid = True
-        elif abs(utc - mono - self.clock_anchor) > 5:
+        elif abs(utc - mono - self.clock_anchor) > 5 or step:
             self.clock_valid = False
             self.clock_anchor = utc - mono
             self.clock_recovery = mono
@@ -302,6 +305,7 @@ class DeliveryObserver:
         if self.previous and row["report_ids"] == self.previous["report_ids"]:
             return self.telemetry(utc)
         if self.previous and (mono - self.previous["mono"] > self.config["max_age"]
+                              or utc <= self.previous["utc"]
                               or any(a < b for a, b in zip(row["source_times"], self.previous["source_times"]))):
             self.interrupt("OBSERVATION_GAP")
             self.zero_since = None
@@ -520,8 +524,10 @@ class DeliveryObserver:
         while blocks and total - blocks[0]["seconds"] >= seconds - 1e-9:
             total -= blocks.popleft()["seconds"]
         if blocks and total > seconds:
-            blocks[0] = {**blocks[0], "start": blocks[0]["start"] + total - seconds,
-                         "seconds": blocks[0]["seconds"] - total + seconds}
+            old = blocks[0]
+            remaining = old["seconds"] - total + seconds
+            blocks[0] = {**old, "start": old["end"] - (old["end"] - old["start"]) * remaining / old["seconds"],
+                         "seconds": remaining}
 
     def _append_evidence(self, block):
         self.evidence.append(deepcopy(block))
@@ -556,8 +562,9 @@ class DeliveryObserver:
             self.evidence.popleft()
         if self.evidence and safe_now is not None and self.evidence[0]["start"] < safe_now - 7 * 86400:
             first = self.evidence[0]
-            first["seconds"] = first["end"] - (now - 7 * 86400)
-            first["start"] = now - 7 * 86400
+            cutoff = now - 7 * 86400
+            first["seconds"] *= (first["end"] - cutoff) / (first["end"] - first["start"])
+            first["start"] = cutoff
         delivery = self._score(self.delivery_window, 300) if self.reason == "QUALIFIED" else self._score([], 300)
         canister = self._score(self.evidence, 1800, 3)
         canister["ready"] = canister["seconds"] >= 7200 and canister["cycles"] >= 3
@@ -676,7 +683,8 @@ class DeliveryObserver:
                         or not all(cls._finite(block[key]) for key in
                                    ("start", "end", "seconds", "measured", "reference"))
                         or block["start"] < previous_end or not 0 < block["seconds"] <= 120
-                        or abs(block["end"] - block["start"] - block["seconds"]) > 1e-6
+                        or block["end"] <= block["start"]
+                        or abs(block["end"] - block["start"] - block["seconds"]) > 5 + 1e-6
                         or block["reference"] <= 0):
                     raise ValueError("Invalid evidence block")
                 for lo, hi in (("lower", "upper"), ("reference_lower", "reference_upper")):
@@ -785,7 +793,11 @@ class HapsicDiagnostics(hass.Hass):
             payload = json.loads(payload)
             if data["topic"] == self.control_topic:
                 voltage = payload["io"]["steam_volts"]
-                fault = payload["fsm"]["state"] == "FAULT"
+                state = payload["fsm"]["state"]
+                if state not in {"INITIALIZING", "STANDBY", "ACTIVE_CRUISE", "TURBO_PENDING", "ACTIVE_TURBO",
+                                 "HYGIENIC_PURGE", "FAULT", "MAINTENANCE_LOCKOUT"}:
+                    raise ValueError("Unknown controller state")
+                fault = state == "FAULT"
                 if not DeliveryObserver._finite(voltage) or not 0 <= voltage <= 10: raise ValueError("Invalid command")
                 if self.control and (fault or voltage != self.control["value"]):
                     values = [r["commanded_voltage"] for r in self.observer.window] + [voltage, self.control["value"]]
@@ -793,7 +805,8 @@ class HapsicDiagnostics(hass.Hass):
                             or max(values) - min(values) > self.observer.config["command_range"] + 1e-9):
                         self.observer.interrupt("COMMAND_EVENT")
                 self.control = dict(value=voltage, unit="V", source=self.control_topic, verified=True,
-                                    report_id=str(time.monotonic_ns()), reported_at=time.time(), fault=fault)
+                                    report_id=str(time.monotonic_ns()), reported_at=time.time(), fault=fault,
+                                    controller_state=state)
             else:
                 if (payload.get("schema_version") != 1 or payload.get("producer_id") != self.producer
                         or not isinstance(payload.get("request_id"), str) or len(payload["request_id"]) > 128):

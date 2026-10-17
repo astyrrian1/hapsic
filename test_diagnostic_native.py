@@ -114,6 +114,10 @@ def test_native_frozen_reference_performance_and_restart_match_python(native, kn
             lines.append("snapshot")
             expected.append(observer.telemetry(now - 5))
         assert [metric["alert"]["decision"] for metric in expected[-2:]] == ["warn", "clear"]
+    observer.observe(inputs(now, 9.5, known=known), now + 0.002, now, synced=True)
+    lines.extend([f"tick {now} 9.5 20 30 20 50 200 101325 {now + 0.002}", "snapshot"])
+    expected.append(observer.telemetry(now))
+    now += 5
     lines.append("restart")
     state = observer.export_state()
     observer = engine()
@@ -152,3 +156,11 @@ def test_native_clock_loss_and_outside_envelope_measurement_status(native):
     assert outside["measurement"]["reason"] == "OUTSIDE_BASELINE_ENVELOPE"
     assert clock_lost["measurement"]["corrected_kg_h"] is None
     assert clock_lost["measurement"]["status"] == "unavailable"
+
+
+def test_native_detects_utc_step_even_when_both_offsets_are_within_anchor_tolerance(native):
+    result = native(["tick 1000 9.5 20 30 20 50 200 101325 1000",
+                     "tick 1001 9.5 20 30 20 50 200 101325 1005",
+                     "tick 1014 9.5 20 30 20 50 200 101325 1010", "snapshot"])[0]
+    assert result["clock_valid"] is False
+    assert result["measurement"]["corrected_kg_h"] is None

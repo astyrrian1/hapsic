@@ -159,7 +159,7 @@ class Observer {
                           : config.max_age))
         return m;
       if (i == 6) {
-        if (s.value < 0 || s.value > 10 || frame.fault || frame.command_uncertain)
+        if (s.value < 0 || s.value > 10 || frame.fault || frame.command_uncertain || !s.verified || !s.source_id)
           return m;
         m.voltage = s.value;
       } else {
@@ -262,16 +262,19 @@ class Observer {
     }
   }
   bool clock(double mono, double utc, bool synced) {
-    if (std::isfinite(last_mono) && mono <= last_mono)
+    if (!std::isfinite(mono) || (std::isfinite(last_mono) && mono <= last_mono))
       return false;
+    bool step = std::isfinite(last_mono) && std::isfinite(last_utc) && std::isfinite(utc) &&
+                std::abs((utc - last_utc) - (mono - last_mono)) > 5;
     last_mono = mono;
+    last_utc = utc;
     if (!synced || !std::isfinite(utc)) {
       clock_valid = false;
       recovery_since = mono;
     } else if (!std::isfinite(anchor)) {
       anchor = utc - mono;
       clock_valid = true;
-    } else if (std::abs(utc - mono - anchor) > 5) {
+    } else if (std::abs(utc - mono - anchor) > 5 || step) {
       clock_valid = false;
       anchor = utc - mono;
       recovery_since = mono;
@@ -327,7 +330,7 @@ class Observer {
     bool older = false;
     for (unsigned i = 0; i < 5 && previous_valid; i++)
       older = older || row.m.times[i] < previous.m.times[i];
-    if (previous_valid && (mono - previous.mono > config.max_age || older)) {
+    if (previous_valid && (mono - previous.mono > config.max_age || utc <= previous.utc || older)) {
       interrupt("OBSERVATION_GAP");
       zero_since = demand_since = NAN;
     }
@@ -479,8 +482,10 @@ class Observer {
       while (!evidence.empty() && evidence.front().end < utc - 7 * 86400)
         evidence.pop_front();
       if (!evidence.empty() && evidence.front().start < utc - 7 * 86400) {
-        evidence.front().start = utc - 7 * 86400;
-        evidence.front().seconds = evidence.front().end - evidence.front().start;
+        auto &first = evidence.front();
+        double cutoff = utc - 7 * 86400;
+        first.seconds *= (first.end - cutoff) / (first.end - first.start);
+        first.start = cutoff;
       }
     }
     delivery = std::strcmp(reason, "QUALIFIED") == 0 ? score(delivery_window, 300, 0) : Score{};
@@ -764,7 +769,8 @@ class Observer {
   Row previous;
   bool previous_valid{false}, identity_valid{false};
   std::array<uint32_t, 7> source_identity{};
-  double last_mono{NAN}, anchor{NAN}, recovery_since{NAN}, zero_since{NAN}, demand_since{NAN}, warmup_until{0};
+  double last_mono{NAN}, last_utc{NAN}, anchor{NAN}, recovery_since{NAN}, zero_since{NAN}, demand_since{NAN},
+      warmup_until{0};
 
   static void number(std::ostream &s, double n) {
     if (std::isfinite(n))
@@ -1011,8 +1017,10 @@ class Observer {
       blocks.pop_front();
     }
     if (!blocks.empty() && total > seconds) {
-      blocks.front().start += total - seconds;
-      blocks.front().seconds -= total - seconds;
+      auto &first = blocks.front();
+      double remaining = first.seconds - total + seconds;
+      first.start = first.end - (first.end - first.start) * remaining / first.seconds;
+      first.seconds = remaining;
     }
   }
   static Score score(const std::deque<Block> &blocks, double minimum, unsigned min_cycles) {
@@ -1140,7 +1148,8 @@ class Observer {
     for (const auto &b : evidence) {
       if (!reference_id || b.generation != generation || !std::isfinite(b.start) || !std::isfinite(b.end) ||
           !std::isfinite(b.measured) || !std::isfinite(b.reference) || b.reference <= 0 || b.seconds <= 0 ||
-          b.seconds > config.max_age || std::abs(b.end - b.start - b.seconds) > 1e-6 || b.start < end)
+          b.seconds > config.max_age || b.end <= b.start || std::abs(b.end - b.start - b.seconds) > 5 + 1e-6 ||
+          b.start < end)
         return false;
       end = b.end;
     }

@@ -135,7 +135,10 @@ minutes apart; abrupt power loss can discard recent uncommitted evidence but doe
 not credit downtime. Restart restores history, discards in-progress qualification
 and imposes warmup. On a UTC mapping jump >5 s, affected evidence is quarantined as
 unscored per-cycle mass/time summaries, preserving bounded memory, and time scoring
-waits for 30 s stable synchronization. Calibration records remain timeless.
+waits for 30 s stable synchronization. Records retain monotonic duration separately
+from UTC span; small synchronized clock jitter is allowed, and partial duration
+or seven-day trimming scales both spans proportionally. A >5 s step or mapping
+shift suspends age-dependent scoring. Calibration records remain timeless.
 
 The opt-in `stamplc*_diagnostics.yaml` variants change the partition table. Their
 first installation requires an explicitly reviewed USB flash. Do not OTA them over

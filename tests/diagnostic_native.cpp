@@ -47,9 +47,12 @@ int main() {
           frame.samples[i].accuracy = i == 0 || i == 2 ? 0.1 : i == 1 || i == 3 ? 0.5 : i == 4 ? 2 : 20;
       }
       frame.samples[6] = Sample{voltage, now, static_cast<uint64_t>(now * 1000), 7, true, NAN};
-      if (command != "measure")
-        observer.observe(frame, now, now, command != "unsynced");
-      else {
+      if (command != "measure") {
+        double mono = now, supplied = 0;
+        if (input >> supplied)
+          mono = supplied;
+        observer.observe(frame, mono, now, command != "unsynced");
+      } else {
         observer.measurement = observer.measure(frame, now);
         std::cout << observer.json(now) << '\n';
       }

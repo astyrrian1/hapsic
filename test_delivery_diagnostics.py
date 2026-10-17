@@ -480,3 +480,71 @@ def test_adapter_transport_failure_breaks_off_and_warmup_history(tmp_path):
     app.diagnostic_tick({})
     assert app.observer.zero_since is None and app.observer.demand_since is None
     app.terminate()
+
+
+def test_unverified_or_string_provenance_cannot_qualify_command_or_sensors():
+    for key, value in (("command", False), ("command", "false"), ("flow", "false")):
+        snapshot = inputs()
+        snapshot[key]["verified"] = value
+        assert engine().measure(snapshot, 1000)["eligible"] is False
+
+
+def test_small_utc_monotonic_jitter_preserves_committed_evidence_on_restore():
+    observer, now = commissioned()
+    now, _ = reference_cycle(observer, now)
+    observer.observe(inputs(now, 9.5), now + 0.002, now, synced=True)
+    state = observer.export_state()
+    assert state["evidence"][-1]["seconds"] != state["evidence"][-1]["end"] - state["evidence"][-1]["start"]
+    restored = engine()
+    restored.restore(state)
+    assert list(restored.evidence) == state["evidence"]
+
+
+def test_partial_interval_trim_scales_utc_span_by_monotonic_duration():
+    from collections import deque
+
+    blocks = deque([dict(start=0, end=10, seconds=10.002)])
+    controller.DeliveryObserver._trim(blocks, 5)
+    assert blocks[0]["seconds"] == pytest.approx(5)
+    assert blocks[0]["start"] == pytest.approx(10 - 10 * 5 / 10.002)
+
+
+def test_utc_step_is_detected_even_within_anchor_tolerance():
+    observer = engine()
+    observer.observe(inputs(1000), 1000, 1000, synced=True)
+    observer.observe(inputs(1001), 1005, 1001, synced=True)
+    result = observer.observe(inputs(1014), 1010, 1014, synced=True)
+    assert result["clock_valid"] is False
+
+
+def test_failed_atomic_replace_keeps_previous_checkpoint(tmp_path, monkeypatch):
+    path = tmp_path / "checkpoint.json"
+    store = controller.DiagnosticStore(path)
+    store.save({"checkpoint": 1})
+    monkeypatch.setattr(controller.os, "replace", lambda *args: (_ for _ in ()).throw(OSError("Injected disk failure")))
+    with pytest.raises(OSError): store.save({"checkpoint": 2})
+    assert store.load() == {"checkpoint": 1}
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_failed_action_write_never_installs_replacement_or_acknowledges_success(tmp_path):
+    from concurrent.futures import Future
+    from unittest.mock import MagicMock
+
+    app = controller.HapsicDiagnostics()
+    app.args = {"data_path": str(tmp_path / "state.json")}
+    app.call_service = MagicMock()
+    app.listen_event = MagicMock()
+    app.initialize()
+    original = app.observer
+    replacement = engine()
+    replacement.command("baseline_start")
+    future = Future()
+    future.set_exception(OSError("Injected disk failure"))
+    app.pending_save = (future, replacement, {"request_id": "failed-action"})
+    app._publish = MagicMock()
+    app._save_completed()
+    assert app.observer is original
+    assert app._publish.call_args.args[1]["status"] == "rejected"
+    assert app.storage_error == "OSError"
+    app.terminate()
