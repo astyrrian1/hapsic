@@ -177,6 +177,15 @@ def test_invalid_persisted_learning_is_not_promoted_to_trained(make_legacy_contr
     assert controller.boiler_curve == [0.0, 0.0, 0.0, 0.0]
 
 
+@pytest.mark.parametrize("payload", ["null", '""', "[]", '[0,0,0,"bad"]', "[0,0,0,NaN]", "[0,0,0,-1]"])
+def test_malformed_legacy_record_is_not_destructively_migrated(make_legacy_controller, payload):
+    controller = make_legacy_controller(payload)
+    controller.tick_counter = 60
+    deliver(controller, 2.0)
+    assert controller.learning_write_ready is False
+    assert controller._test_states[CURVE_ENTITY] == payload
+
+
 def test_count_saturates_without_changing_ema_update(make_legacy_controller):
     maximum_count = 2**32 - 1
     controller = make_legacy_controller(json.dumps({"v": 2, "curve": [0, 0, 0, 2], "counts": [0, 0, 0, maximum_count]}))

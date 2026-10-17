@@ -972,6 +972,11 @@ class HapsicController(hass.Hass):
         try:
             data = json.loads(raw)
             if isinstance(data, list):
+                if len(data) != 4 or any(
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0 for value in data
+                ):
+                    raise ValueError("Invalid legacy learning array")
                 # Preserve the original payload durably before any v2 overwrite.
                 path = Path(self.args.get("learning_backup_path", "/config/hapsic-data/legacy-curve-v1.json"))
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -1010,7 +1015,7 @@ class HapsicController(hass.Hass):
                         raise ValueError("Invalid learning rate/count")
                 if restore:
                     self.boiler_curve, self.boiler_curve_counts = list(rates), list(counts)
-            elif data not in (None, ""):
+            else:
                 raise ValueError("Unsupported learning record")
             self.learning_write_ready = True
         except (ValueError, TypeError, KeyError, OSError) as error:
