@@ -2,8 +2,291 @@ import json
 import math
 import time
 import traceback
+from collections import deque
+from copy import deepcopy
+from hashlib import sha256
+from itertools import product
 
 import appdaemon.plugins.hass.hassapi as hass
+
+
+class DeliveryObserver:
+    """Diagnostic-only SI observer. Never receives a controller or actuator object.
+
+    Saturation pressure and dry-air specific volume follow ASHRAE 2017,
+    independently checked against PsychroLib 2.5.0:
+    https://psychrometrics.github.io/psychrolib/api_docs.html#psychrolib.GetMoistAirVolume
+    """
+
+    AIR_KEYS = ("upstream_t", "upstream_rh", "downstream_t", "downstream_rh", "flow")
+    KEYS = AIR_KEYS + ("pressure", "command")
+    DEFAULTS = dict(airflow_basis="unverified", reporting_verified=False,
+                    max_age=120.0, pressure_max_age=900.0, max_skew=30.0,
+                    minimum_reports=3, stable_seconds=300.0, warmup_seconds=900.0,
+                    off_seconds=900.0, baseline_seconds=600.0, minimum_flow=50.0,
+                    command_range=0.2, flow_range=0.05, temperature_slope=0.2,
+                    moisture_slope=0.0001, warning=60.0, recovery=65.0,
+                    max_evidence=10080, max_window=512, site_pressure_pa=88600.0)
+
+    def __init__(self, config=None):
+        self.config = {**self.DEFAULTS, **deepcopy(config or {})}
+        for key in ("max_age", "pressure_max_age", "max_skew", "stable_seconds", "warmup_seconds",
+                    "off_seconds", "baseline_seconds", "minimum_flow", "command_range", "flow_range",
+                    "temperature_slope", "moisture_slope", "max_evidence", "max_window", "site_pressure_pa"):
+            if not self._finite(self.config[key]) or self.config[key] <= 0:
+                raise ValueError(f"Invalid diagnostic setting: {key}")
+        if not 0 < self.config["warning"] < self.config["recovery"]:
+            raise ValueError("Diagnostic recovery threshold must exceed warning")
+        self.config_id = sha256(json.dumps(self.config, sort_keys=True, allow_nan=False).encode()).hexdigest()[:16]
+        self.generation = self.config_id
+        self.baseline = None
+        self.reference = None
+        self.candidate = None
+        self.revision = 0
+        self.archives = deque(maxlen=4)
+        self.evidence = deque()
+        self.window = deque()
+        self.delivery_window = deque()
+        self.previous = None
+        self.last_mono = None
+        self.last_utc = None
+        self.clock_valid = False
+        self.clock_anchor = None
+        self.clock_recovery = None
+        self.zero_since = None
+        self.demand_since = None
+        self.cycle = 0
+        self.off_period = 0
+        self.last_zero_end = None
+        self.qualified_seconds = 0.0
+        self.reason = "STARTUP"
+        self.last_valid = {}
+        self.alert_episode = 0
+        self.alert_active = False
+        self.exclusions = {}
+        self.cursors = {}
+        self.last_measurement = self._missing("STARTUP")
+
+    @staticmethod
+    def _finite(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+    @staticmethod
+    def _missing(reason):
+        return dict(status="unavailable", reason=reason, eligible=False, raw_kg_h=None,
+                    corrected_kg_h=None, lower_kg_h=None, upper_kg_h=None, uncertainty_kg_h=None)
+
+    @staticmethod
+    def _convert(value, unit, key):
+        if key.endswith("_t"):
+            if unit in ("°C", "C"): return value, 1.0
+            if unit in ("°F", "F"): return (value - 32.0) / 1.8, 1 / 1.8
+        elif key.endswith("_rh") and unit == "%": return value, 1.0
+        elif key == "flow":
+            if unit in ("m³/h", "m3/h"): return value, 1.0
+            if unit == "cfm": return value * 1.69901079552, 1.69901079552
+        elif key == "pressure":
+            factors = {"Pa": 1.0, "kPa": 1000.0, "hPa": 100.0, "mbar": 100.0, "inHg": 3386.389}
+            if unit in factors: return value * factors[unit], factors[unit]
+        elif key == "command" and unit == "V": return value, 1.0
+        raise ValueError(f"Unsupported diagnostic unit: {key}")
+
+    @staticmethod
+    def humidity_ratio(temp, rh, pressure):
+        if not -80 <= temp <= 100 or not 0 <= rh <= 100 or not 20000 <= pressure <= 120000:
+            raise ValueError("Psychrometric input domain")
+        kelvin = temp + 273.15
+        if temp <= 0.01:
+            log_p = (-5674.5359 / kelvin + 6.3925247 - 0.009677843 * kelvin
+                     + 0.00000062215701 * kelvin ** 2 + 0.0000000020747825 * kelvin ** 3
+                     - 0.0000000000009484024 * kelvin ** 4 + 4.1635019 * math.log(kelvin))
+        else:
+            log_p = (-5800.2206 / kelvin + 1.3914993 - 0.048640239 * kelvin
+                     + 0.000041764768 * kelvin ** 2 - 0.000000014452093 * kelvin ** 3
+                     + 6.5459673 * math.log(kelvin))
+        vapor = math.exp(log_p) * rh / 100.0
+        if vapor >= pressure: raise ValueError("Vapor pressure exceeds absolute pressure")
+        return 0.621945 * vapor / (pressure - vapor)
+
+    @classmethod
+    def _rates(cls, values, offset):
+        ut, ur, dt, dr, flow, pressure = values
+        upstream = cls.humidity_ratio(ut, ur, pressure)
+        downstream = cls.humidity_ratio(dt, dr, pressure)
+        volume = 287.042 * (ut + 273.15) * (1 + 1.607858 * upstream) / pressure
+        mass = flow / volume
+        return mass * (downstream - upstream), mass * (downstream - upstream - offset), downstream - upstream
+
+    def measure(self, snapshot, now):
+        try:
+            values, errors, times, ids = [], [], [], []
+            verified = self.config["reporting_verified"] and self.config["airflow_basis"] == "actual_upstream"
+            pressure_fallback = "pressure" not in snapshot
+            for key in self.KEYS:
+                if key == "pressure" and pressure_fallback:
+                    values.append(self.config["site_pressure_pa"])
+                    errors.append(None)
+                    verified = False
+                    continue
+                item = snapshot[key]
+                if not self._finite(item["value"]) or not self._finite(item["reported_at"]):
+                    raise ValueError("Nonfinite source")
+                age = now - item["reported_at"]
+                max_age = self.config["pressure_max_age"] if key == "pressure" else self.config["max_age"]
+                if not 0 <= age <= (15 if key == "command" else max_age):
+                    raise ValueError("Stale or future source")
+                value, factor = self._convert(item["value"], item["unit"], key)
+                if key == "command":
+                    if not 0 <= value <= 10 or item.get("fault", False) or item.get("uncertain", False):
+                        raise ValueError("Command unavailable or faulted")
+                    continue
+                values.append(value)
+                accuracy = item.get("accuracy")
+                errors.append(abs(factor) * accuracy if self._finite(accuracy) and accuracy >= 0 else None)
+                verified = verified and item.get("verified", False) and bool(item.get("source"))
+                if key in self.AIR_KEYS:
+                    times.append(item["reported_at"])
+                    ids.append(str(item["report_id"]))
+            if max(times) - min(times) > self.config["max_skew"]:
+                raise ValueError("Source timestamp skew")
+            if values[4] < 0: raise ValueError("Negative flow")
+            offset = self.baseline["offset"] if self.baseline else 0.0
+            raw, corrected, delta = self._rates(values, offset)
+            lower = upper = uncertainty = None
+            if all(error is not None for error in errors):
+                # Enclose each w and specific-volume term independently. This
+                # preserves correlated biases conservatively, without 1/sqrt(N).
+                bounds = [(v - e, v + e) for v, e in zip(values, errors)]
+                wu, wd, volumes = [], [], []
+                for temp, rh, pressure in product(bounds[0], bounds[1], bounds[5]):
+                    w = self.humidity_ratio(temp, min(100, max(0, rh)), pressure)
+                    wu.append(w)
+                    volumes.append(287.042 * (temp + 273.15) * (1 + 1.607858 * w) / pressure)
+                for temp, rh, pressure in product(bounds[2], bounds[3], bounds[5]):
+                    wd.append(self.humidity_ratio(temp, min(100, max(0, rh)), pressure))
+                offset_error = self.baseline.get("residual", 0.0) if self.baseline else 0.0
+                deltas = (min(wd) - max(wu) - offset - offset_error,
+                          max(wd) - min(wu) - offset + offset_error)
+                masses = (max(0, bounds[4][0]) / max(volumes), bounds[4][1] / min(volumes))
+                rates = [m * d for m, d in product(masses, deltas)]
+                lower, upper = min(rates), max(rates)
+                uncertainty = max(corrected - lower, upper - corrected)
+            reason = "OK" if verified else "UNVERIFIED_PROVENANCE_OR_AIRFLOW"
+            if pressure_fallback: reason = "SITE_PRESSURE_ESTIMATE"
+            if upper is not None and upper < 0:
+                reason, verified = "MEASUREMENT_MISMATCH", False
+            return dict(status="valid" if verified and uncertainty is not None else "provisional", reason=reason,
+                        eligible=bool(verified), raw_kg_h=raw, corrected_kg_h=corrected,
+                        lower_kg_h=lower, upper_kg_h=upper, uncertainty_kg_h=uncertainty,
+                        delta_w=delta, upstream_t=values[0], upstream_rh=values[1], flow=values[4],
+                        report_ids=ids, source_times=times, commanded_voltage=snapshot["command"]["value"])
+        except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+            return self._missing("INVALID_OR_MISSING_SOURCE")
+
+    @staticmethod
+    def _slope(rows, key):
+        mean_t = sum(row["mono"] for row in rows) / len(rows)
+        mean_v = sum(row[key] for row in rows) / len(rows)
+        denominator = sum((row["mono"] - mean_t) ** 2 for row in rows)
+        return (60 * sum((row["mono"] - mean_t) * (row[key] - mean_v) for row in rows) / denominator
+                if denominator else 0.0)
+
+    def _stable(self, rows, seconds):
+        if not rows or rows[-1]["mono"] - rows[0]["mono"] < seconds - 1e-6: return False
+        for index in range(5):
+            if len({r["report_ids"][index] for r in rows}) < self.config["minimum_reports"]: return False
+        volts = [row["commanded_voltage"] for row in rows]
+        flow = [row["flow"] for row in rows]
+        return (max(volts) - min(volts) <= self.config["command_range"] + 1e-9
+                and max(flow) - min(flow) <= self.config["flow_range"] * sum(flow) / len(flow) + 1e-9
+                and abs(self._slope(rows, "upstream_t")) <= self.config["temperature_slope"] + 1e-9
+                and abs(self._slope(rows, "delta_w")) <= self.config["moisture_slope"] + 1e-12)
+
+    def interrupt(self, reason):
+        self.previous = None
+        self.window.clear()
+        self.delivery_window.clear()
+        self.qualified_seconds = 0.0
+        self.reason = reason
+        self.exclusions[reason] = self.exclusions.get(reason, 0) + 1
+
+    def _clock(self, mono, utc, synced):
+        if self.last_mono is not None and mono <= self.last_mono: return False
+        self.last_mono = mono
+        if not synced or not self._finite(utc):
+            self.clock_valid = False
+            self.clock_recovery = None
+        elif self.clock_anchor is None:
+            self.clock_anchor = utc - mono
+            self.clock_valid = True
+        elif abs(utc - mono - self.clock_anchor) > 5:
+            self.clock_valid = False
+            self.clock_anchor = utc - mono
+            self.clock_recovery = mono
+            self.evidence.clear()
+        elif self.clock_recovery is not None and mono - self.clock_recovery >= 30:
+            self.clock_valid = True
+            self.clock_recovery = None
+        self.last_utc = utc
+        return self.clock_valid
+
+    def observe(self, snapshot, mono, utc, *, synced=False):
+        if not self._clock(mono, utc, synced):
+            self.interrupt("CLOCK_UNSYNCHRONIZED")
+            return self.telemetry(utc)
+        result = self.measure(snapshot, utc)
+        self.last_measurement = result
+        if not result["eligible"] or result.get("flow", 0) < self.config["minimum_flow"]:
+            self.zero_since = None
+            self.demand_since = None
+            self.interrupt(result["reason"] if not result["eligible"] else "LOW_FLOW")
+            return self.telemetry(utc)
+        row = {**result, "mono": mono, "utc": utc}
+        voltage = row["commanded_voltage"]
+        if self.previous and row["report_ids"] == self.previous["report_ids"]:
+            self.reason = "NO_NEW_OBSERVATION"
+            return self.telemetry(utc)
+        if self.previous and (mono - self.previous["mono"] > self.config["max_age"]
+                              or any(a < b for a, b in zip(row["source_times"], self.previous["source_times"]))):
+            self.interrupt("OBSERVATION_GAP")
+            self.zero_since = None
+            self.demand_since = None
+        if voltage == 0:
+            if self.zero_since is None:
+                self.zero_since = mono
+                self.off_period += 1
+            self.last_zero_end = mono
+            self.demand_since = None
+        else:
+            if self.demand_since is None:
+                off = mono - self.zero_since if self.zero_since is not None else None
+                if off is not None and off >= self.config["off_seconds"]: self.cycle += 1
+                self.demand_since = mono
+                self.warmup_until = mono + self.config["warmup_seconds"] if off is None or off >= 60 else mono
+            self.zero_since = None
+        if voltage > 0 and mono < self.warmup_until:
+            self.interrupt("WARMUP")
+            self.previous = row
+            return self.telemetry(utc)
+        if self.previous and (self.previous["commanded_voltage"] == 0) != (voltage == 0):
+            self.interrupt("COMMAND_INTERRUPTED")
+        self.window.append(row)
+        duration = self.config["baseline_seconds"] if voltage == 0 else self.config["stable_seconds"]
+        while len(self.window) > 1 and self.window[1]["mono"] <= mono - duration:
+            self.window.popleft()
+        if len(self.window) > self.config["max_window"]:
+            self.interrupt("CAPACITY_EXHAUSTED")
+        stable = self._stable(self.window, duration)
+        self.reason = "QUALIFIED" if stable else "STABILIZING"
+        self.previous = row
+        return self.telemetry(utc)
+
+    def telemetry(self, now):
+        return dict(schema_version=1, generation=self.generation, clock_valid=self.clock_valid,
+                    measurement=deepcopy(self.last_measurement),
+                    qualification=dict(stable=self.reason == "QUALIFIED", reason=self.reason,
+                                       qualified_seconds=self.qualified_seconds, cycle_id=self.cycle),
+                    exclusions=dict(self.exclusions))
 
 
 class HapsicController(hass.Hass):
