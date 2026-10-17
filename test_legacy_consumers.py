@@ -266,6 +266,12 @@ def test_diagnostics_offline_and_stale_states_do_not_look_current():
     assert "Stale" in stale
 
 
+def test_missing_calibration_state_never_claims_an_accepted_reference():
+    rendered_card = render_diagnostic_card()
+    assert "Waiting for calibration status" in rendered_card
+    assert "Results use the accepted reference" not in rendered_card
+
+
 def test_diagnostic_tiles_have_readable_empty_states():
     dashboard = yaml.safe_load((ROOT / "dashboards/mission-control.yaml").read_text())
     entities = {"sensor.hapsic_canister_performance", "sensor.hapsic_delivery_performance",

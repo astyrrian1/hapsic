@@ -52,10 +52,14 @@ views:
               **Provisional reference — measurement accuracy is not yet established**
 
               {{ explanations.get(reason, 'Results are empirical estimates under comparable operating conditions.') }}
-              {% else %}
+              {% elif calibration == 'valid' %}
               **Delivery diagnostics**
 
               {{ explanations.get(reason, 'Results use the accepted reference where operating conditions match.') }}
+              {% else %}
+              **Waiting for calibration status**
+
+              Diagnostic updates are arriving, but calibration information is not available yet.
               {% endif %}
 
               | Measurement | Current result |
