@@ -194,7 +194,10 @@ def test_mission_control_renders_legacy_and_counted_learning_records(record, exp
     assert "4-6V" in rendered_card
 
 
-@pytest.mark.parametrize("record", ["", "not-json", '{"v":2,"curve":[NaN,2,3,4]}', "{\"v\":2,\"curve\":[1],\"counts\":[]}"])
+@pytest.mark.parametrize(
+    "record",
+    ["", "not-json", '{"v":2,"curve":[NaN,2,3,4]}', '{"v":2,"curve":[1],"counts":[]}'],
+)
 def test_mission_control_falls_back_safely_for_malformed_learning_records(record):
     rendered_card = render_boiler_curve(record)
     assert "| **Capacity (lb/hr)** | 0.00 | 0.00 | 0.00 | 0.00 |" in rendered_card
