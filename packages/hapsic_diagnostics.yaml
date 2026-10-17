@@ -195,7 +195,7 @@ script:
         name: Owner confirms a healthy canister for reference collection
         default: false
         selector:
-          boolean: {}
+          boolean:
     sequence:
       - action: mqtt.publish
         data:

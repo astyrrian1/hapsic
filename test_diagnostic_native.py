@@ -137,3 +137,18 @@ def test_native_frozen_reference_performance_and_restart_match_python(native, kn
 
 def test_native_command_identity_rejects_embedded_nul_without_truncating(native):
     assert native(["request abc\0one", "request abc", "request", "request " + "a" * 129]) == [False, True, False, False]
+
+
+def test_native_clock_loss_and_outside_envelope_measurement_status(native):
+    lines = ["known", "action baseline_start"]
+    for period in range(4):
+        start = 1000 + period * 1520
+        lines.extend(f"tick {now} 0 20 30 20 30 200 101325" for now in range(start, start + 1506, 5))
+        lines.append(f"tick {start + 1510} 1 20 30 20 30 200 101325")
+    lines.extend(["action baseline_accept 1", "measure 20.1 30 20 50 200 101325",
+                  "unsynced 7100 9.5 20 30 20 50 200 101325", "snapshot"])
+    outside, clock_lost = native(lines)
+    assert outside["measurement"]["status"] == "provisional"
+    assert outside["measurement"]["reason"] == "OUTSIDE_BASELINE_ENVELOPE"
+    assert clock_lost["measurement"]["corrected_kg_h"] is None
+    assert clock_lost["measurement"]["status"] == "unavailable"

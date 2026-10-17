@@ -433,3 +433,50 @@ def test_controller_outputs_and_learning_are_identical_with_observer_faults(monk
         for field in ("fsm_state", "steam_voltage", "chi_ema", "boiler_curve", "boiler_curve_counts"):
             assert getattr(plain, field) == getattr(observed, field), field
     assert plain_calls == observed_calls
+
+
+def test_clock_loss_never_republishes_an_old_measurement_as_current():
+    observer = engine()
+    observer.observe(inputs(1000), 1000, 1000, synced=True)
+    result = observer.observe(inputs(1005), 1005, 1005, synced=False)
+    assert result["measurement"]["corrected_kg_h"] is None
+    assert result["measurement"]["status"] == "unavailable"
+
+
+def test_outside_baseline_envelope_is_explicitly_provisional():
+    observer = engine()
+    now = commission_baseline(observer, known=True)
+    values = inputs(now, known=True)
+    values["upstream_t"]["value"] = 20.1
+    result = observer.measure(values, now)
+    assert result["status"] == "provisional"
+    assert result["reason"] == "OUTSIDE_BASELINE_ENVELOPE"
+
+
+def test_reference_review_shows_incomplete_bin_progress_without_accepting_it():
+    observer = engine()
+    now = commission_baseline(observer)
+    observer.command("reference_start", healthy=True)
+    reference_cycle(observer, now)
+    candidate = observer.review()
+    assert candidate["bins"], "Review must show partial qualified minutes and contributing cycles"
+    bucket = next(iter(candidate["bins"].values()))
+    assert bucket["seconds"] > 0 and len(bucket["cycles"]) == 1
+    assert candidate["ready"] is False
+    with pytest.raises(ValueError): observer.command("reference_accept", candidate["revision"])
+
+
+def test_adapter_transport_failure_breaks_off_and_warmup_history(tmp_path):
+    from unittest.mock import MagicMock
+
+    app = controller.HapsicDiagnostics()
+    app.args = {"data_path": str(tmp_path / "state.json")}
+    app.call_service = MagicMock()
+    app.listen_event = MagicMock()
+    app.initialize()
+    app.observer.zero_since = 100
+    app.observer.demand_since = 100
+    app._publish = MagicMock(side_effect=RuntimeError("MQTT disconnected"))
+    app.diagnostic_tick({})
+    assert app.observer.zero_since is None and app.observer.demand_since is None
+    app.terminate()

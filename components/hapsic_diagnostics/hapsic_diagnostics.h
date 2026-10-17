@@ -156,9 +156,11 @@ class DiagnosticComponent : public PollingComponent {
       frame_.fault = remote_fault_ || command_interrupted_;
     frame_.command_uncertain = frame_.command_uncertain || !std::isfinite(last_input_) || mono - last_input_ > 30;
     command_interrupted_ = false;
-    if (heap_caps_get_free_size(MALLOC_CAP_8BIT) < 65536)
-      observer_.interrupt("CAPACITY_EXHAUSTED");
-    else if (!replacement_)
+    if (heap_caps_get_free_size(MALLOC_CAP_8BIT) < 65536) {
+      observer_.break_continuity("CAPACITY_EXHAUSTED");
+      observer_.measurement = Measurement{};
+      observer_.measurement.reason = "CAPACITY_EXHAUSTED";
+    } else if (!replacement_)
       observer_.observe(frame_, mono, utc, stamp.is_valid());
     if (!pending_ && mono - last_checkpoint_ >= 300) {
       if (allocation_headroom())
@@ -289,8 +291,10 @@ class DiagnosticComponent : public PollingComponent {
     storage_error_ = !ok;
     if (ok) {
       manifest_ = next_manifest_;
-      if (replacement_)
+      if (replacement_) {
         observer_ = std::move(*replacement_);
+        observer_.break_continuity("STORAGE_COMMITTED");
+      }
     }
     if (replacement_) {
       acknowledge(request_, ok);

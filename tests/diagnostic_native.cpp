@@ -32,10 +32,10 @@ int main() {
       auto state = observer.save();
       if (!observer.restore(state))
         return 2;
-    } else if (command == "measure" || command == "tick") {
+    } else if (command == "measure" || command == "tick" || command == "unsynced") {
       Frame frame;
       double voltage = 9.5;
-      if (command == "tick")
+      if (command != "measure")
         input >> now >> voltage;
       for (int i = 0; i < 6; i++) {
         input >> frame.samples[i].value;
@@ -47,8 +47,8 @@ int main() {
           frame.samples[i].accuracy = i == 0 || i == 2 ? 0.1 : i == 1 || i == 3 ? 0.5 : i == 4 ? 2 : 20;
       }
       frame.samples[6] = Sample{voltage, now, static_cast<uint64_t>(now * 1000), 7, true, NAN};
-      if (command == "tick")
-        observer.observe(frame, now, now, true);
+      if (command != "measure")
+        observer.observe(frame, now, now, command != "unsynced");
       else {
         observer.measurement = observer.measure(frame, now);
         std::cout << observer.json(now) << '\n';

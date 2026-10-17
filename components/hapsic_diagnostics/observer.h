@@ -225,7 +225,13 @@ class Observer {
       m.reason = "MEASUREMENT_MISMATCH";
       m.eligible = false;
     }
+    if (std::strcmp(m.reason, "OK") == 0 && baseline.valid && !in_envelope(m))
+      m.reason = "OUTSIDE_BASELINE_ENVELOPE";
     return m;
+  }
+  void break_continuity(const char *why) {
+    zero_since = demand_since = NAN;
+    interrupt(why);
   }
   void interrupt(const char *why) {
     previous_valid = false;
@@ -285,6 +291,8 @@ class Observer {
     if (!clock(mono, utc, synced)) {
       zero_since = demand_since = NAN;
       interrupt("CLOCK_UNSYNCHRONIZED");
+      measurement = Measurement{};
+      measurement.reason = "CLOCK_UNSYNCHRONIZED";
       refresh(utc);
       return;
     }
@@ -302,6 +310,8 @@ class Observer {
       action("baseline_reset");
       source_identity = identity;
       interrupt("SOURCE_IDENTITY_CHANGED");
+      measurement = Measurement{};
+      measurement.reason = "SOURCE_IDENTITY_CHANGED";
       refresh(utc);
       return;
     }
@@ -531,9 +541,10 @@ class Observer {
     number(s, measurement.uncertainty);
     s << ",\"eligible\":" << (measurement.eligible ? "true" : "false") << ",\"reason\":\"" << measurement.reason
       << "\",\"status\":\""
-      << (!std::isfinite(measurement.raw)                                  ? "unavailable"
-          : measurement.eligible && std::isfinite(measurement.uncertainty) ? "valid"
-                                                                           : "provisional")
+      << (!std::isfinite(measurement.raw) ? "unavailable"
+          : measurement.eligible && std::isfinite(measurement.uncertainty) && std::strcmp(measurement.reason, "OK") == 0
+              ? "valid"
+              : "provisional")
       << "\"},\"qualification\":{\"stable\":" << (std::strcmp(reason, "QUALIFIED") == 0 ? "true" : "false")
       << ",\"reason\":\"" << reason << "\",\"qualified_seconds\":" << qualified_seconds << ",\"cycle_id\":" << cycle
       << "},\"calibration\":{\"status\":\""

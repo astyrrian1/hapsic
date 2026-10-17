@@ -188,7 +188,11 @@ class DeliveryObserver:
                 lower = upper = uncertainty = None
             if self.baseline and snapshot["command"]["value"] > 0 and upper is not None and upper < 0:
                 reason, verified = "MEASUREMENT_MISMATCH", False
-            return dict(status="valid" if verified and uncertainty is not None else "provisional", reason=reason,
+            if reason == "OK" and self.baseline and not self._in_envelope(
+                    dict(upstream_t=values[0], upstream_rh=values[1], flow=values[4])):
+                reason = "OUTSIDE_BASELINE_ENVELOPE"
+            return dict(status="valid" if verified and uncertainty is not None and reason == "OK" else "provisional",
+                        reason=reason,
                         eligible=bool(verified), raw_kg_h=raw, corrected_kg_h=corrected,
                         lower_kg_h=lower, upper_kg_h=upper, uncertainty_kg_h=uncertainty,
                         delta_uncertainty=(uncertainty / (values[4] /
@@ -272,6 +276,7 @@ class DeliveryObserver:
         if not self._clock(mono, utc, synced):
             self.zero_since = self.demand_since = None
             self.interrupt("CLOCK_UNSYNCHRONIZED")
+            self.last_measurement = self._missing("CLOCK_UNSYNCHRONIZED")
             return self.telemetry(utc)
         result = self.measure(snapshot, utc)
         self.last_measurement = result
@@ -286,6 +291,7 @@ class DeliveryObserver:
             self.command("baseline_reset")
             self.source_identity = identity
             self.interrupt("SOURCE_IDENTITY_CHANGED")
+            self.last_measurement = self._missing("SOURCE_IDENTITY_CHANGED")
             return self.telemetry(utc)
         self.source_identity = identity
         row = {**result, "mono": mono, "utc": utc}
@@ -419,6 +425,7 @@ class DeliveryObserver:
                 self.reference = None
             else:
                 self.reference = deepcopy(candidate)
+                self.reference["bins"] = {k: b for k, b in self.reference["bins"].items() if b["ready"]}
             self.candidate = None
             self.evidence.clear()
             self.quarantined_evidence.clear()
@@ -489,7 +496,6 @@ class DeliveryObserver:
                 if not bucket["uncertainty_known"]: bucket["lower"] = bucket["upper"] = None
                 if bucket["lower"] is not None and bucket["lower"] <= 0: bucket["ready"] = False
             candidate["ready"] = any(b["ready"] for b in candidate["bins"].values())
-            candidate["bins"] = {k: b for k, b in candidate["bins"].items() if b["ready"]}
         return candidate
 
     def _reference_rate(self, voltage, flow):
@@ -801,7 +807,10 @@ class HapsicDiagnostics(hass.Hass):
                         or not -5 <= time.time() - payload["issued_at"] <= 30):
                     raise ValueError("Expired command")
                 self.commands.put_nowait((time.monotonic(), payload))
-        except (ValueError, TypeError, KeyError, queue.Full):
+        except (ValueError, TypeError, KeyError, queue.Full, RecursionError):
+            if data.get("topic") == self.control_topic:
+                self.control = None
+                self.observer.zero_since = self.observer.demand_since = None
             self.observer.interrupt("MESSAGE_REJECTED")
 
     @staticmethod
@@ -899,6 +908,7 @@ class HapsicDiagnostics(hass.Hass):
                            published_at=now, storage_error=self.storage_error)
             self._publish(self.topic, payload)
         except Exception as error:
+            self.observer.zero_since = self.observer.demand_since = None
             self.observer.interrupt("OBSERVER_ERROR")
             self.log(f"Diagnostic tick failed: {type(error).__name__}", level="WARNING")
 
