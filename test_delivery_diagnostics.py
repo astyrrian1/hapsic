@@ -122,3 +122,105 @@ def test_input_snapshots_are_not_modified():
     before = copy.deepcopy(values)
     observer.observe(values, 1000, 1000, synced=True)
     assert values == before
+
+
+def commission_baseline(observer, known=False):
+    observer.command("baseline_start")
+    now = 1000
+    for period in range(4):
+        advance(observer, now, 1505, known=known)
+        now += 1510
+        advance(observer, now, 5, voltage=1, known=known)
+        now += 10
+    candidate = observer.review()
+    assert candidate["ready"] is True
+    observer.command("baseline_accept", candidate["revision"])
+    return now
+
+
+def test_baseline_requires_four_distinct_off_periods_and_explicit_acceptance():
+    observer = engine()
+    observer.command("baseline_start")
+    advance(observer, 1000, 8000)
+    assert len(observer.review()["windows"]) == 1
+    assert observer.baseline is None
+    with pytest.raises(ValueError): observer.command("baseline_accept", observer.review()["revision"])
+    observer = engine()
+    commission_baseline(observer)
+    assert observer.baseline["offset"] == pytest.approx(0)
+    assert observer.baseline["uncertainty_known"] is False
+
+
+def test_replayed_acceptance_and_generation_change_cannot_reuse_evidence():
+    observer = engine()
+    commission_baseline(observer)
+    accepted = observer.generation
+    with pytest.raises(ValueError): observer.command("baseline_accept", 1)
+    observer.command("baseline_reset")
+    assert observer.baseline is None and observer.reference is None
+    assert observer.generation != accepted
+    assert not observer.evidence
+
+
+def test_baseline_offset_does_not_normalize_away_zero_production():
+    observer = engine()
+    commission_baseline(observer)
+    result = observer.measure(inputs(downstream_rh=30), 1000)
+    assert result["corrected_kg_h"] == pytest.approx(0)
+    assert result["eligible"] is True
+
+
+def reference_cycle(observer, now, *, voltage=9.5, rh=50, known=False):
+    advance(observer, now, 905, known=known)
+    now += 910
+    result = advance(observer, now, 1810, voltage, rh, known=known)
+    return now + 1815, result
+
+
+def commissioned(known=False):
+    observer = engine()
+    now = commission_baseline(observer, known)
+    observer.command("reference_start", healthy=True)
+    for _ in range(3):
+        now, _ = reference_cycle(observer, now, known=known)
+    review = observer.review()
+    assert review["ready"] is True
+    observer.command("reference_accept", review["revision"])
+    return observer, now
+
+
+def test_frozen_reference_retains_zero_and_does_not_clip_excursions():
+    observer, now = commissioned()
+    frozen = copy.deepcopy(observer.reference)
+    now, result = reference_cycle(observer, now, rh=30)
+    assert result["delivery"]["value"] == pytest.approx(0)
+    now, result = reference_cycle(observer, now, rh=90)
+    assert result["delivery"]["value"] > 100
+    assert observer.reference == frozen
+
+
+def test_unknown_uncertainty_never_warns_even_with_sustained_failure():
+    observer, now = commissioned()
+    for _ in range(9):
+        now, result = reference_cycle(observer, now, rh=30)
+    assert result["canister"]["value"] == pytest.approx(0)
+    assert result["canister"]["status"] == "provisional"
+    assert result["alert"]["decision"] == "inconclusive"
+
+
+def test_persistence_restores_committed_evidence_but_not_continuity(tmp_path):
+    observer, now = commissioned()
+    now, _ = reference_cycle(observer, now)
+    path = tmp_path / "diagnostics.json"
+    assert hasattr(controller, "DiagnosticStore"), "Atomic diagnostic persistence is missing"
+    store = controller.DiagnosticStore(path)
+    store.save(observer.export_state())
+    restored = engine()
+    restored.restore(store.load())
+    assert restored.reference == observer.reference
+    assert list(restored.evidence) == list(observer.evidence)
+    assert restored.previous is None and not restored.window
+    result = restored.observe(inputs(now, 9.5), now, now, synced=True)
+    assert result["qualification"]["reason"] == "WARMUP"
+    path.write_text('{"schema_version":999}')
+    with pytest.raises(ValueError): restored.restore(store.load())
