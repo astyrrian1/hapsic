@@ -228,14 +228,14 @@ views:
               {% if counts is not sequence or counts is string or counts|length != 4 %}
               {% set counts = none %}
               {% endif %}
-              {% set b0 = bins[0] if bins[0] is number and is_number(bins[0]) else 0 %}
-              {% set b1 = bins[1] if bins[1] is number and is_number(bins[1]) else 0 %}
-              {% set b2 = bins[2] if bins[2] is number and is_number(bins[2]) else 0 %}
-              {% set b3 = bins[3] if bins[3] is number and is_number(bins[3]) else 0 %}
-              {% set c0 = counts[0] if counts is not none and counts[0] is number and is_number(counts[0]) else '—' %}
-              {% set c1 = counts[1] if counts is not none and counts[1] is number and is_number(counts[1]) else '—' %}
-              {% set c2 = counts[2] if counts is not none and counts[2] is number and is_number(counts[2]) else '—' %}
-              {% set c3 = counts[3] if counts is not none and counts[3] is number and is_number(counts[3]) else '—' %}
+              {% set b0 = bins[0] if bins[0] is number else 0 %}
+              {% set b1 = bins[1] if bins[1] is number else 0 %}
+              {% set b2 = bins[2] if bins[2] is number else 0 %}
+              {% set b3 = bins[3] if bins[3] is number else 0 %}
+              {% set c0 = counts[0] if counts is not none and counts[0] is number else '—' %}
+              {% set c1 = counts[1] if counts is not none and counts[1] is number else '—' %}
+              {% set c2 = counts[2] if counts is not none and counts[2] is number else '—' %}
+              {% set c3 = counts[3] if counts is not none and counts[3] is number else '—' %}
               | Voltage Band | 2-4V | 4-6V | 6-8V | 8-10V |
               | :---: | :---: | :---: | :---: | :---: |
               | **Capacity (lb/hr)** | {{ '%.2f'|format(b0) }} | {{ '%.2f'|format(b1) }} | {{ '%.2f'|format(b2) }} | {{ '%.2f'|format(b3) }} |
