@@ -95,7 +95,7 @@ def render_boiler_curve(helper_value):
             return default
 
     environment.filters["from_json"] = from_json
-    environment.tests["number"] = is_number
+    environment.globals["is_number"] = is_number
     return environment.from_string(card["content"]).render(
         states=lambda _entity_id: helper_value
     )
