@@ -270,13 +270,16 @@ def test_diagnostic_tiles_have_readable_empty_states():
     dashboard = yaml.safe_load((ROOT / "dashboards/mission-control.yaml").read_text())
     entities = {"sensor.hapsic_canister_performance", "sensor.hapsic_delivery_performance",
                 "sensor.hapsic_estimated_steam_delivery_imperial"}
-    tiles = [card for card in dashboard_cards(dashboard) if isinstance(card.get("entity"), str) and card["entity"] in entities]
+    tiles = [card for card in dashboard_cards(dashboard)
+             if card.get("type") in {"tile", "custom:mushroom-template-card"}
+             and isinstance(card.get("entity"), str) and card["entity"] in entities]
     assert len(tiles) == 3
     environment = Environment()
     environment.globals["is_number"] = is_number
     for tile in tiles:
         assert tile["type"] == "custom:mushroom-template-card"
         secondary = environment.from_string(tile["secondary"]).render(
-            entity=tile["entity"], states=lambda _entity: "unknown")
+            entity=tile["entity"],
+            states=lambda entity: "uncalibrated" if entity == "sensor.hapsic_diagnostic_calibration" else "unknown")
         assert "unknown" not in secondary.lower()
         assert "Commissioning required" in secondary

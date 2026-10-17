@@ -5,6 +5,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.8.1] — 2026-10-17
+
+### Fixed
+- Preserve Markdown row breaks so Mission Control renders the learned boiler curve
+  as a table, and explain when empty bins have not yet trained.
+- Replace unexplained unknown diagnostic values with commissioning, disconnected,
+  provisional and stale states. Preserve real zero and above-100% results.
+
+### Deployment Notes
+Update the manually installed Mission Control dashboard YAML to apply this UI fix.
+HACS does not replace a dashboard that was copied into Home Assistant. Controller
+calculations, diagnostic qualification/calibration and firmware behavior are unchanged.
+No firmware flash is needed for this dashboard update.
+
 ## [v2.8.0] — 2026-10-17
 
 ### Legacy control and telemetry repairs
