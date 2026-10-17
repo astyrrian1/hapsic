@@ -124,7 +124,7 @@ def test_input_snapshots_are_not_modified():
     assert values == before
 
 
-def commission_baseline(observer, known=False):
+def commission_baseline(observer, known=False, *, accept=True):
     observer.command("baseline_start")
     now = 1000
     for period in range(4):
@@ -134,7 +134,7 @@ def commission_baseline(observer, known=False):
         now += 10
     candidate = observer.review()
     assert candidate["ready"] is True
-    observer.command("baseline_accept", candidate["revision"])
+    if accept: observer.command("baseline_accept", candidate["revision"])
     return now
 
 
@@ -548,3 +548,31 @@ def test_failed_action_write_never_installs_replacement_or_acknowledges_success(
     assert app._publish.call_args.args[1]["status"] == "rejected"
     assert app.storage_error == "OSError"
     app.terminate()
+
+
+def test_mqtt_reconnect_breaks_history_and_changes_raw_relay_identity(tmp_path):
+    from unittest.mock import MagicMock
+
+    app = controller.HapsicDiagnostics()
+    app.args = {"data_path": str(tmp_path / "state.json")}
+    app.call_service = MagicMock()
+    app.listen_event = MagicMock()
+    app.get_state = MagicMock(return_value=None)
+    app.initialize()
+    app.control = {"value": 9.5}
+    app.observer.zero_since = app.observer.demand_since = 100
+    app.diagnostic_connectivity("MQTT_MESSAGE", {"state": "Disconnected"}, {})
+    assert app.control is None and app.observer.zero_since is None and app.observer.demand_since is None
+    app._publish = MagicMock()
+    app.diagnostic_connectivity("MQTT_MESSAGE", {"state": "Connected"}, {})
+    app.diagnostic_tick({})
+    raw = next(call.args[1] for call in app._publish.call_args_list if call.args[0].endswith("/inputs"))
+    assert raw["connection_id"] == app.boot_id + ":1"
+    app.terminate()
+
+
+def test_acceptance_revision_is_an_integer_identifier_not_a_boolean():
+    observer = engine()
+    commission_baseline(observer, accept=False)
+    with pytest.raises(ValueError): observer.command("baseline_accept", True)
+    assert observer.baseline is None

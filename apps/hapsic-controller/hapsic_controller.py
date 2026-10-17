@@ -412,7 +412,7 @@ class DeliveryObserver:
             self.candidate = None
         elif action in ("baseline_accept", "reference_accept"):
             candidate = self.review()
-            if (not candidate or candidate["kind"] != action.split("_")[0]
+            if (type(revision) is not int or not candidate or candidate["kind"] != action.split("_")[0]
                     or candidate["revision"] != revision or not candidate["ready"]
                     or candidate["generation"] != self.generation):
                 raise ValueError("Candidate is incomplete, incompatible, or stale")
@@ -748,6 +748,8 @@ class HapsicDiagnostics(hass.Hass):
 
     def initialize(self):
         self.boot_id = str(uuid4())
+        self.connection_revision = 0
+        self.mqtt_online = None
         self.sequence = 0
         self.producer = self.args.get("producer_id", "hapsic-python")
         self.namespace = self.args.get("mqtt_namespace", "mqtt")
@@ -777,6 +779,10 @@ class HapsicDiagnostics(hass.Hass):
         except Exception as error:
             self.storage_error = type(error).__name__
             self.log(f"Diagnostic storage rejected: {type(error).__name__}; commissioning required", level="WARNING")
+        try:
+            self.listen_event(self.diagnostic_connectivity, "MQTT_MESSAGE", namespace=self.namespace)
+        except Exception as error:
+            self.log(f"Diagnostic connection events unavailable: {type(error).__name__}", level="WARNING")
         for topic in (self.control_topic, self.topic + "/command"):
             try:
                 self.call_service("mqtt/subscribe", namespace=self.namespace, topic=topic)
@@ -784,6 +790,21 @@ class HapsicDiagnostics(hass.Hass):
             except Exception as error:
                 self.log(f"Diagnostic MQTT unavailable: {type(error).__name__}", level="WARNING")
         self.run_every(self.diagnostic_tick, "now", 5)
+
+    def diagnostic_connectivity(self, event, data, kwargs):
+        state = data.get("state")
+        if state not in ("Connected", "Disconnected"): return
+        self.mqtt_online = state == "Connected"
+        self.control = None
+        self.observer.zero_since = self.observer.demand_since = None
+        self.observer.interrupt("MQTT_CONNECTION_CHANGED")
+        if self.mqtt_online:
+            self.connection_revision += 1
+            for topic in (self.control_topic, self.topic + "/command"):
+                try:
+                    self.call_service("mqtt/subscribe", namespace=self.namespace, topic=topic)
+                except Exception as error:
+                    self.log(f"Diagnostic resubscribe failed: {type(error).__name__}", level="WARNING")
 
     def diagnostic_message(self, event, data, kwargs):
         try:
@@ -854,7 +875,8 @@ class HapsicDiagnostics(hass.Hass):
         return snapshot
 
     def _publish(self, topic, payload):
-        self.call_service("mqtt/publish", namespace=self.namespace, topic=topic, retain=False,
+        if self.mqtt_online is False: raise RuntimeError("Diagnostic MQTT disconnected")
+        self.call_service("mqtt/publish", namespace=self.namespace, topic=topic, retain=False, qos=0,
                           payload=json.dumps(payload, allow_nan=False, separators=(",", ":")))
 
     def _save_completed(self):
@@ -905,7 +927,8 @@ class HapsicDiagnostics(hass.Hass):
             self.sequence += 1
             self._publish(self.topic + "/inputs", dict(
                 schema_version=1, producer_id=self.producer, boot_id=self.boot_id,
-                sequence=self.sequence, published_at=now, samples=snapshot))
+                sequence=self.sequence, connection_id=f"{self.boot_id}:{self.connection_revision}",
+                published_at=now, samples=snapshot))
             accepting = self.pending_save is not None and self.pending_save[1] is not None
             if accepting:
                 payload = self.observer.telemetry(now)

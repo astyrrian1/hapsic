@@ -108,10 +108,10 @@ Required groups: `schema_version`, `producer_id`, `boot_id`, `sequence`,
 present, `last_observed_at`. Alert carries decision, episode, active, warning,
 recovery and frozen `evidence`. Consumers must test status, not numeric truthiness.
 
-Raw `.../inputs` schema 1 carries producer/boot/sequence/publication time plus
+Raw `.../inputs` schema 1 carries producer/boot/connection/sequence/publication time plus
 `samples` using the atomic input contract above. The C++ adapter verifies relay
 identity, ordering and 30 s relay age, preserves original source report timestamps
-and IDs, converts each value with its accompanying unit and independently computes
+and IDs, breaks continuity on producer/broker reconnect or missing relay packets, converts each value with its accompanying unit and independently computes
 all diagnostic mathematics. Desk uses production's reported command; the production
 variant reads its own controller's const getters. Raw relay is read-only and is
 not an actuator command channel. Duplicate reconnect reports never add evidence.
@@ -144,6 +144,14 @@ The opt-in `stamplc*_diagnostics.yaml` variants change the partition table. Thei
 first installation requires an explicitly reviewed USB flash. Do not OTA them over
 an existing partition map. Base firmware does not enable the observer. Firmware
 flashing is a separate rollout, not part of deploying Python/HA diagnostics.
+
+For a later firmware-owned production diagnostic topic, first change HA's expected
+producer to `hapsic-firmware`. Move the Python observer's `diagnostics_topic` to a
+shadow namespace and set firmware `input_topic` to that namespace's `/inputs`
+subtopic. This keeps its raw relay running while only firmware publishes production
+results. Commission a new independent firmware baseline/reference; do not copy the
+Python store into NVS. Configure broker ACLs for the chosen producer before cutover.
+
 
 ## Commissioning, rollout and rollback
 

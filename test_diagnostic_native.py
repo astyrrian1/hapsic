@@ -164,3 +164,11 @@ def test_native_detects_utc_step_even_when_both_offsets_are_within_anchor_tolera
                      "tick 1014 9.5 20 30 20 50 200 101325 1010", "snapshot"])[0]
     assert result["clock_valid"] is False
     assert result["measurement"]["corrected_kg_h"] is None
+
+
+def test_native_connection_history_break_restarts_active_warmup(native):
+    lines = [f"tick {now} 9.5 20 30 20 50 200 101325" for now in range(1000, 2301, 5)]
+    lines += ["snapshot", "break", "tick 2305 9.5 20 30 20 50 200 101325", "snapshot"]
+    before, after = native(lines)
+    assert before["qualification"]["reason"] == "QUALIFIED"
+    assert after["qualification"]["reason"] == "WARMUP"

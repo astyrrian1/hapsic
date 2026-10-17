@@ -108,6 +108,9 @@ class DiagnosticComponent : public PollingComponent {
           return false;
         if (!allocation_headroom())
           return false;
+        std::string action = root["action"].as<std::string>();
+        if ((action == "baseline_accept" || action == "reference_accept") && !root["revision"].is<uint32_t>())
+          return false;
         auto replacement = std::unique_ptr<Observer>(new Observer(observer_));
         if (!replacement->action(root["action"].as<std::string>(), root["revision"].as<uint32_t>(),
                                  (root["healthy"].is<bool>() && root["healthy"].as<bool>())))
@@ -127,6 +130,12 @@ class DiagnosticComponent : public PollingComponent {
     uint32_t current = millis();
     monotonic_ms_ += uint32_t(current - last_ms_);
     last_ms_ = current;
+    bool connected = mqtt::global_mqtt_client->is_connected();
+    if (connected != mqtt_connected_) {
+      mqtt_connected_ = connected;
+      last_input_ = NAN;
+      observer_.break_continuity("MQTT_CONNECTION_CHANGED");
+    }
     if (!remote_command_)
       command_event(controller_->diagnostic_commanded_voltage(), controller_->diagnostic_faulted());
     if (!pending_)
@@ -197,9 +206,10 @@ class DiagnosticComponent : public PollingComponent {
   std::array<std::string, 6> identities_{};
   std::array<bool, 6> verified_{};
 
-  std::string producer_, topic_, boot_, request_, input_topic_, input_producer_, input_boot_;
+  std::string producer_, topic_, boot_, request_, input_topic_, input_producer_, input_boot_, input_connection_;
   uint64_t input_sequence_{0};
   double last_input_{NAN}, last_input_publication_{0};
+  bool mqtt_connected_{false};
   bool remote_command_{false}, remote_fault_{false}, command_interrupted_{false};
   uint64_t monotonic_ms_{0}, command_report_{0}, sequence_{0};
   uint32_t last_ms_{0};
@@ -343,9 +353,10 @@ class DiagnosticComponent : public PollingComponent {
     auto now = clock_->now();
     double published = root["published_at"].as<double>();
     std::string boot = root["boot_id"].as<std::string>();
+    std::string connection = root["connection_id"].as<std::string>();
     uint64_t sequence = root["sequence"].as<uint64_t>();
     if (!now.is_valid() || !root["schema_version"].is<int>() || root["schema_version"].as<int>() != 1 ||
-        root["producer_id"].as<std::string>() != input_producer_ || boot.empty() ||
+        root["producer_id"].as<std::string>() != input_producer_ || boot.empty() || connection.empty() ||
         !root["published_at"].is<double>() || !std::isfinite(published) || !root["sequence"].is<uint64_t>() ||
         sequence == 0 || now.timestamp - published > 30 || published - now.timestamp > 5 ||
         published < last_input_publication_ || (boot == input_boot_ && sequence <= input_sequence_))
@@ -386,7 +397,11 @@ class DiagnosticComponent : public PollingComponent {
     }
     if (!remote_command_)
       next.samples[6] = frame_.samples[6];
+    if (!input_boot_.empty() &&
+        (boot != input_boot_ || connection != input_connection_ || sequence != input_sequence_ + 1))
+      observer_.break_continuity("RELAY_CONTINUITY_LOST");
     frame_ = next;
+    input_connection_ = connection;
     last_input_ = monotonic_ms_ / 1000.0;
     input_boot_ = boot;
     input_sequence_ = sequence;

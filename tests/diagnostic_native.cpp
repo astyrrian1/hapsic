@@ -28,6 +28,8 @@ int main() {
       uint32_t revision = 0;
       input >> action >> revision;
       observer.action(action, revision, true);
+    } else if (command == "break") {
+      observer.break_continuity("MQTT_CONNECTION_CHANGED");
     } else if (command == "restart") {
       auto state = observer.save();
       if (!observer.restore(state))
