@@ -5,6 +5,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Independent diagnostic observer and AppDaemon scheduling/persistence, with equivalent native C++ math and state traces.
+- Explicit raw source contracts, warmup/stability qualification, four-period baseline validation, frozen reference generations, conservative uncertainty and integrated performance windows.
+- Non-retained schema-1 MQTT diagnostics, guarded durable calibration commands, alert episode persistence and new HA sensors/dashboard/notification consumers.
+- Opt-in desk/production diagnostic firmware variants with isolated NVS storage; flashing remains separate.
+
+### Changed
+- Label legacy CHI, net flux, feasibility and nameplate delivery as control-model estimates; preserve signed output and percentages above 100.
+- Resolve the unavailable M5GFX 0.2.19 registry pin to the exact upstream 0.2.19 Git commit, without upgrading its version.
+
+### Commissioning
+- Sensor reporting/scaling/flow contracts, held-out baseline, owner-confirmed reference, timing/rollback and >=24 h/three natural cycles remain required. Defaults do not manufacture a calibrated result. See docs/delivery-diagnostics.md.
+
 ## [v2.7.4] — 2026-05-22
 
 ### Added

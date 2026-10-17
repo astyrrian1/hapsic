@@ -99,3 +99,11 @@ HAPSIC enforces a strict Enterprise-Grade CI/CD pipeline. No Pull Request can be
 - See **[SETUP.md](SETUP.md)** to configure your local toolchain spanning Python, ESPHome, Clang-format, and preparing your M5Stack StamPLC device via USB.
 - See **[CONTRIBUTING.md](CONTRIBUTING.md)** for a comprehensive guide on running the test suites, generating simulations, and contributing to the engine.
 - See **[CHANGELOG.md](CHANGELOG.md)** for release history.
+
+## Trustworthy delivery diagnostics
+
+The independent Python/C++ diagnostic observer adds signed Estimated Steam Delivery,
+generation-compatible Delivery Performance and historical Canister Performance.
+It leaves legacy control and CHI meanings intact. Configuration starts unverified;
+calibration and natural-cycle commissioning are explicit acceptance gates. See the
+[diagnostic contract and rollout guide](docs/delivery-diagnostics.md).

@@ -81,12 +81,12 @@ class DiagnosticComponent : public PollingComponent {
         storage_error_ = true;
     }
     mqtt::global_mqtt_client->subscribe(input_topic_, [this](const std::string &, const std::string &payload) {
-      if (payload.size() > 8192)
+      if (payload.size() > 8192 || heap_caps_get_free_size(MALLOC_CAP_8BIT) < 65536)
         return;
       json::parse_json(payload, [this](JsonObject root) { return read_inputs(root); });
     });
     mqtt::global_mqtt_client->subscribe(topic_ + "/command", [this](const std::string &, const std::string &payload) {
-      if (payload.size() > 1024 || pending_)
+      if (payload.size() > 1024 || pending_ || heap_caps_get_free_size(MALLOC_CAP_8BIT) < 65536)
         return;
       json::parse_json(payload, [this](JsonObject root) {
         if (!root["schema_version"].is<int>() || root["schema_version"].as<int>() != 1 ||

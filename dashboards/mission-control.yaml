@@ -12,6 +12,26 @@ views:
               {{ states('sensor.hapsic_fsm_state') | upper }} • Target {{
               states('input_number.target_dew_point') }} °F DP • {{
               states('sensor.hapsic_fault_reason') }}
+          - type: entities
+            title: Delivery measurement and calibration
+            entities:
+              - sensor.hapsic_estimated_steam_delivery
+              - sensor.hapsic_measurement_status
+              - sensor.hapsic_delivery_performance
+              - sensor.hapsic_canister_performance
+              - sensor.hapsic_diagnostic_calibration
+              - sensor.hapsic_diagnostic_qualification
+              - sensor.hapsic_canister_evidence_hours
+              - sensor.hapsic_diagnostic_evidence_age
+              - sensor.hapsic_last_observed_delivery_age
+              - sensor.hapsic_diagnostic_exclusions
+              - script.hapsic_diagnostic_action
+          - type: markdown
+            content: >-
+              Delivery is an estimate between the two sensor locations. Performance
+              requires an accepted healthy reference and matching conditions.
+              Provisional or insufficient data does not establish canister condition.
+              Review the calibration entity attributes before accepting its candidate revision.
           - type: conditional
             conditions:
               - condition: state
@@ -42,7 +62,6 @@ views:
               type: markdown
               content: >
                 ### Economizer Bypass Active
-
                 HAPSIC is yielding because the controller reported an economizer
                 bypass fault state.
           - type: horizontal-stack
@@ -81,17 +100,9 @@ views:
                   red: 5.5
               - type: vertical-stack
                 cards:
-                  - type: gauge
-                    entity: sensor.hapsic_chi_instant
-                    name: Canister Health
-                    unit: "%"
-                    min: 0
-                    max: 120
-                    needle: true
-                    severity:
-                      red: 50
-                      yellow: 70
-                      green: 90
+                  - type: tile
+                    entity: sensor.hapsic_canister_performance
+                    name: Canister Performance
                   - type: markdown
                     content: >
                       <center><b>Boiler State:</b> <span style="color: {% if
@@ -114,19 +125,19 @@ views:
                   {% if val > 0 %} blue {% else %} grey {% endif %}
                 state_content: state
               - type: tile
-                entity: sensor.hapsic_health_measured_steam
-                name: Actual Steam
+                entity: sensor.hapsic_estimated_steam_delivery_imperial
+                name: Estimated Steam Delivery
                 icon: mdi:gauge-full
                 color: >-
-                  {% set val = states('sensor.hapsic_health_measured_steam')|float(0) %}
+                  {% set val = states('sensor.hapsic_estimated_steam_delivery_imperial')|float(0) %}
                   {% if val > 0 %} green {% else %} grey {% endif %}
                 state_content: state
               - type: tile
-                entity: sensor.hapsic_health_production_efficiency
-                name: Efficiency
+                entity: sensor.hapsic_delivery_performance
+                name: Delivery Performance
                 icon: mdi:percent-circle
                 color: >-
-                  {% set val = states('sensor.hapsic_health_production_efficiency')|float(0) %}
+                  {% set val = states('sensor.hapsic_delivery_performance')|float(0) %}
                   {% if val > 90 %} green {% elif val > 60 %} orange
                   {% elif val > 0 %} red {% else %} grey {% endif %}
                 state_content: state
@@ -142,7 +153,7 @@ views:
           - type: custom:apexcharts-card
             header:
               show: true
-              title: "Steam Output \u2014 Commanded vs Actual (lbs/hr)"
+              title: "Steam Output \u2014 Control Model vs Estimated Delivery (lbs/hr)"
               show_states: true
               colorize_states: true
             graph_span: 12h
@@ -154,15 +165,15 @@ views:
                 curve: stepline
                 show:
                   in_header: true
-              - entity: sensor.hapsic_health_measured_steam
-                name: Actual
+              - entity: sensor.hapsic_estimated_steam_delivery_imperial
+                name: Estimated Delivery
                 stroke_width: 2
                 color: "#66bb6a"
                 curve: smooth
                 show:
                   in_header: true
               - entity: input_number.humidifier_max_capacity
-                name: Effective Max
+                name: Configured Nameplate Capacity
                 stroke_width: 1
                 color: "#ef5350"
                 opacity: 0.4
@@ -170,20 +181,19 @@ views:
                 show:
                   in_header: false
             yaxis:
-              - min: 0
-                decimals: 2
+              - decimals: 2
           - type: custom:apexcharts-card
             header:
               show: true
-              title: Production Efficiency (%)
+              title: Delivery Performance (%)
               show_states: true
               colorize_states: true
             graph_span: 12h
             experimental:
               color_threshold: true
             series:
-              - entity: sensor.hapsic_health_production_efficiency
-                name: Efficiency
+              - entity: sensor.hapsic_delivery_performance
+                name: Delivery Performance
                 stroke_width: 2
                 curve: smooth
                 show:
@@ -196,27 +206,20 @@ views:
                   - value: 90
                     color: "#4caf50"
             yaxis:
-              - min: 0
-                max: 120
-                decimals: 0
+              - decimals: 0
           - type: markdown
             title: Boiler Curve (Learned)
             content: >
               {% set curve = states('input_text.hapsic_boiler_curve') %}
-
               {% set bins = curve | from_json([0,0,0,0]) %}
-
               | Voltage Band | 0-2.5V | 2.5-5V | 5-7.5V | 7.5-10V |
-
               | :---: | :---: | :---: | :---: | :---: |
-
               | **Capacity** | {{ '%.2f'|format(bins[0]) }} | {{ '%.2f'|format(bins[1]) }} | {{ '%.2f'|format(bins[2]) }} | {{ '%.2f'|format(bins[3]) }} |
-
               | **Bar** | {{ '█' * ((bins[0]*10)|int) }} | {{ '█' * ((bins[1]*10)|int) }} | {{ '█' * ((bins[2]*10)|int) }} | {{ '█' * ((bins[3]*10)|int) }} |
           - type: custom:apexcharts-card
             header:
               show: true
-              title: "Canister Health (\u03C7 Ratio)"
+              title: "Legacy Control CHI (not calibrated performance)"
               show_states: true
               colorize_states: true
             graph_span: 12h
@@ -237,7 +240,8 @@ views:
                   - value: 90
                     color: "#4caf50"
               - entity: input_number.hapsic_chi_ema
-                name: "\u03C7 EMA (48h)"
+                name: "Legacy CHI EMA (%)"
+                transform: return x * 100;
                 stroke_width: 2
                 color: "#9b59b6"
                 curve: smooth
@@ -245,7 +249,6 @@ views:
                   in_header: true
             yaxis:
               - min: 0
-                max: 120
                 decimals: 0
           - type: heading
             heading: Physics Engine (Decoupled)
@@ -397,15 +400,11 @@ views:
             title: Mass Balance Tracker
             content: >
               | Metric | Value | Impact |
-
               | :--- | :--- | :--- |
-
               | **Injection** | `{{ states('sensor.hapsic_steam_mass') }} lbs/hr` |
               Wetting ⬆️ |
-
               | **Ventilation** | `{{ states('sensor.hapsic_ventilation_loss') }}
               lbs/hr` | Drying ⬇️ |
-
               | **NET FLUX** | **{{ states('sensor.hapsic_net_flux') }} lbs/hr** |
               **{{ 'CHARGING' if states('sensor.hapsic_net_flux')|float(0) > 0 else
               'DRAINING' }}** |
@@ -443,21 +442,13 @@ views:
               {% set events = states('sensor.hapsic_economy_advisory_count_7d')|float(0) %}
               {% set ratio = (advisory_h / steaming_h * 100) if steaming_h > 0 else 0 %}
               {% set candidate = steaming_h >= 24 and (ratio >= 25 or severe_h >= 4) %}
-
               | 7-day metric | Value |
-
               | :--- | :---: |
-
               | Advisory while steaming | `{{ advisory_h|round(1) }} h` |
-
               | Severe advisory | `{{ severe_h|round(1) }} h` |
-
               | Total steaming | `{{ steaming_h|round(1) }} h` |
-
               | Advisory share | `{{ ratio|round(0) }}%` |
-
               | Events | `{{ events|round(0) }}` |
-
               | **Promotion gate** | **{{ 'CANDIDATE' if candidate else 'KEEP OBSERVING' }}** |
           - type: custom:apexcharts-card
             header:
@@ -488,7 +479,7 @@ views:
                 color: "#3498db"
                 unit_of_measurement: lbs/hr
               battery:
-                name: Net Flux
+                name: Control-model Net Flux
                 entity:
                   consumption: sensor.hapsic_net_flux
                   production: sensor.hapsic_net_flux
@@ -532,7 +523,7 @@ views:
                 state_content: state
               - type: tile
                 entity: sensor.hapsic_max_achievable_dp
-                name: Feasibility Limit
+                name: Control-model Feasibility Limit
                 icon: mdi:speedometer
                 color: >-
                   {% if states('sensor.hapsic_is_target_infeasible') == 'True' %}
@@ -557,7 +548,7 @@ views:
                 stroke_width: 2
                 curve: stepline
               - entity: sensor.hapsic_max_achievable_dp
-                name: Physical Limit
+                name: Control-model Limit
                 color: "#f44336"
                 stroke_width: 2
                 type: area

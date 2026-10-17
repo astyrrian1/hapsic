@@ -52,7 +52,7 @@ CLANG_FMT="/opt/homebrew/opt/llvm/bin/clang-format"
 echo ""
 echo "=== 2. C++ Format Check (clang-format) ==="
 if [[ -x "$CLANG_FMT" ]]; then
-  $CLANG_FMT --dry-run --Werror components/hapsic/*.cpp components/hapsic/*.h
+  $CLANG_FMT --dry-run --Werror components/hapsic/*.cpp components/hapsic/*.h components/hapsic_diagnostics/*.h tests/diagnostic_native.cpp tests/diagnostic_control_native.cpp
   echo "✓ C++ formatting clean."
 else
   echo "⚠ clang-format not found. Install: brew install llvm"
@@ -66,12 +66,18 @@ esphome config stamplc.yaml > /dev/null
 echo "✓ Production YAML valid."
 esphome config stamplc_desk.yaml > /dev/null
 echo "✓ Desk YAML valid."
+esphome config stamplc_diagnostics.yaml > /dev/null
+esphome config stamplc_desk_diagnostics.yaml > /dev/null
+echo "✓ Diagnostic variant YAML valid."
 
 # 4. ESPHome desk compilation
 echo ""
 echo "=== 4. ESPHome Desk Firmware Compilation ==="
 esphome compile stamplc_desk.yaml
 echo "✓ Desk firmware compiled successfully."
+esphome compile stamplc_desk_diagnostics.yaml
+esphome compile stamplc_diagnostics.yaml
+echo "✓ Diagnostic production and desk firmware compiled successfully."
 
 # 5. Full offline CI suite
 echo ""
