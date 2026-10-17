@@ -89,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -102,3 +104,7 @@ jobs:
           bash run_cpp.sh
       - name: Compare control outputs with diagnostic fault injection
         run: python3 verify_diagnostic_control.py
+      - name: Legacy control math, persistence, telemetry and structured replay
+        run: |
+          python3 verify_legacy_control.py
+          python3 test_offline_parity.py

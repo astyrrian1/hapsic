@@ -5,6 +5,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Legacy control and telemetry repairs
+
+- Correct C++ g/kg/grains and kg/lb boundaries throughout legacy delivery, losses,
+  CHI, learned capacity and feed-forward; publish actual instantaneous CHI.
+- Initialize new bins with a 50-tick mean, persist real counts in versioned records,
+  and protect/verify the original Python helper backup before migration.
+- Publish current eligibility and unavailable measurements consistently across MQTT,
+  native sensors and HA; reuse the site's existing UI learning helper.
+- Enforce the existing actuator envelope after slew: actual recorded-input replay
+  exposed pre-existing over/undershoot that the repaired model encountered more often.
+- Replace weak offline parity with deterministic actual-controller replay, including
+  private real-history verification, counted restart and real adapter fault isolation.
+
+
 ### Added
 - Independent diagnostic observer and AppDaemon scheduling/persistence, with equivalent native C++ math and state traces.
 - Explicit raw source contracts, warmup/stability qualification, four-period baseline validation, frozen reference generations, conservative uncertainty and integrated performance windows.

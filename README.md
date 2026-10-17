@@ -107,3 +107,7 @@ generation-compatible Delivery Performance and historical Canister Performance.
 It leaves legacy control and CHI meanings intact. Configuration starts unverified;
 calibration and natural-cycle commissioning are explicit acceptance gates. See the
 [diagnostic contract and rollout guide](docs/delivery-diagnostics.md).
+
+Legacy control revision 2 fixes units, learning initialization, counted restart and
+current telemetry. See [migration and replay instructions](docs/legacy-repairs.md)
+and the [recorded-input verification report](docs/legacy-replay-report.md).

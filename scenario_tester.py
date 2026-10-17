@@ -114,8 +114,7 @@ def run_tests():
             val = float(row['state'])
             if 'temp' in row['entity_id']:
                 val = val * 9.0/5.0 + 32.0 # SI to Imperial for python PRD
-            elif 'flow' in row['entity_id']:
-                val = val * 0.588578 # m3/h to CFM
+            # Flow remains m³/h; the authoritative controller converts it once.
             timeline[ts][row['entity_id']] = val
 
     sorted_times = sorted(list(timeline.keys()))

@@ -52,7 +52,7 @@ CLANG_FMT="/opt/homebrew/opt/llvm/bin/clang-format"
 echo ""
 echo "=== 2. C++ Format Check (clang-format) ==="
 if [[ -x "$CLANG_FMT" ]]; then
-  $CLANG_FMT --dry-run --Werror components/hapsic/*.cpp components/hapsic/*.h components/hapsic_diagnostics/*.h tests/diagnostic_native.cpp tests/diagnostic_control_native.cpp
+  $CLANG_FMT --dry-run --Werror components/hapsic/*.cpp components/hapsic/*.h components/hapsic_diagnostics/*.h tests/diagnostic_native.cpp tests/diagnostic_control_native.cpp tests/legacy_replay_native.cpp
   echo "✓ C++ formatting clean."
 else
   echo "⚠ clang-format not found. Install: brew install llvm"

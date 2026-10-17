@@ -960,6 +960,91 @@ class HapsicController(hass.Hass):
     SHELLY_OFFLINE_FAULT_SECONDS = 60.0
     SENSOR_LOSS_GRACE_SECONDS = 60.0
 
+    def _restore_learning(self, restore=True):
+        """Restore counted learning; never infer training from a positive rate."""
+        self.learning_write_ready = False
+        raw = self.get_state("input_text.hapsic_boiler_curve")
+        if raw == "":
+            self.learning_write_ready = True
+            return
+        if raw in (None, "unknown", "unavailable"):
+            return
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                # Preserve the original payload durably before any v2 overwrite.
+                path = Path(self.args.get("learning_backup_path", "/config/hapsic-data/legacy-curve-v1.json"))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    with path.open("x", encoding="utf-8") as stream:
+                        stream.write(raw)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    directory = os.open(path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                except FileExistsError:
+                    pass
+                if path.read_text() != raw:
+                    raise ValueError("Legacy learning backup differs; refusing overwrite")
+                # A prior directory-sync failure may have left a matching file.
+                # Re-establish both durability barriers before authorizing overwrite.
+                with path.open("rb") as stream:
+                    os.fsync(stream.fileno())
+                directory = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+                # Historical rates have no trustworthy counts. Requalify them.
+            elif isinstance(data, dict) and data.get("v") == 2:
+                rates, counts = data["curve"], data["counts"]
+                if len(rates) != 4 or len(counts) != 4:
+                    raise ValueError("Expected four learning bins")
+                for rate, count in zip(rates, counts):
+                    if (isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate)
+                            or type(count) is not int or not 0 <= count <= 0xffffffff
+                            or (count == 0 and rate != 0) or (count > 0 and rate <= 0)):
+                        raise ValueError("Invalid learning rate/count")
+                if restore:
+                    self.boiler_curve, self.boiler_curve_counts = list(rates), list(counts)
+            elif data not in (None, ""):
+                raise ValueError("Unsupported learning record")
+            self.learning_write_ready = True
+        except (ValueError, TypeError, KeyError, OSError) as error:
+            self.log(f"Learning restore/migration blocked: {error}", level="WARNING")
+
+    def _checkpoint_learning(self):
+        if not self.learning_write_ready:
+            # A helper restored after AppDaemon startup must not permanently
+            # disable checkpoints or discard the fresh in-memory observations.
+            self._restore_learning(restore=False)
+        if not self.learning_write_ready:
+            return
+        try:
+            payload = json.dumps(dict(v=2, curve=self.boiler_curve, counts=self.boiler_curve_counts),
+                                 separators=(",", ":"), allow_nan=False)
+            limit = self.get_state("input_text.hapsic_boiler_curve", attribute="max")
+            if not isinstance(limit, (int, float)) or not math.isfinite(limit) or not 1 <= limit <= 255:
+                raise ValueError("Learning helper maximum length unavailable")
+            if len(payload) > limit:
+                raise ValueError("Learning checkpoint exceeds helper limit")
+            self.call_service("input_number/set_value", entity_id="input_number.hapsic_chi_ema",
+                              value=round(self.chi_ema, 3))
+            self.call_service("input_text/set_value", entity_id="input_text.hapsic_boiler_curve", value=payload)
+        except Exception as error:
+            self.log(f"Learning checkpoint failed: {error}", level="WARNING")
+
+    def _invalidate_current_diagnostics(self):
+        self.chi_instant = 0.0
+        self.chi_eligible = False
+        self._last_measured_steam = 0.0
+        self.calc_flux = math.nan
+        self.calc_loss_vent = math.nan
+        self.boil_status = "UNKNOWN" if self.fsm_state == "FAULT" else "COLD"
+
     def initialize(self):
         """
         HAPSIC 2.7.4
@@ -1078,7 +1163,7 @@ class HapsicController(hass.Hass):
         # Restore CHI EMA from persistent storage
         try:
             stored_chi = float(self.get_state("input_number.hapsic_chi_ema"))
-            self.chi_ema = stored_chi if stored_chi > 0 else 1.0
+            self.chi_ema = stored_chi if math.isfinite(stored_chi) and 0 <= stored_chi <= 2 else 1.0
         except (ValueError, TypeError):
             self.chi_ema = 1.0
 
@@ -1093,21 +1178,10 @@ class HapsicController(hass.Hass):
         self.BOILER_CURVE_MIN_SAMPLES = 50  # Gate: don't use until 50 data points
         self.boiler_curve_alpha = 0.002   # ~6 min half-life at 5s ticks
         self.boiler_curve_counts = [0] * self.BOILER_CURVE_BINS
+        self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
 
-        # Restore boiler curve from persistent storage
-        try:
-            stored_curve = json.loads(
-                self.get_state("input_text.hapsic_boiler_curve"))
-            if isinstance(stored_curve, list) and len(stored_curve) == self.BOILER_CURVE_BINS:
-                self.boiler_curve = [float(v) for v in stored_curve]
-                # Mark restored bins as pre-trained
-                self.boiler_curve_counts = [
-                    999 if v > 0 else 0 for v in self.boiler_curve]
-                self.log(f"Boiler curve restored: {self.boiler_curve}")
-            else:
-                self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
-        except (ValueError, TypeError, json.JSONDecodeError, Exception):
-            self.boiler_curve = [0.0] * self.BOILER_CURVE_BINS
+        self._restore_learning()
+        self._invalidate_current_diagnostics()
 
         # --- 3. RESTART HANDLING (Safety Park) ---
         self.log("SYSTEM RESTART DETECTED: Executing Safety Park Protocol...", level="WARNING")
@@ -1579,6 +1653,7 @@ class HapsicController(hass.Hass):
     # =========================================================================
 
     def master_tick(self, kwargs):
+        self._invalidate_current_diagnostics()
         now = time.time()
         self.dt = now - self.last_tick_ts
         self.last_tick_ts = now
@@ -2091,6 +2166,8 @@ class HapsicController(hass.Hass):
         return self.MAX_CAPACITY * self.chi_ema
 
     def run_diagnostics(self):
+        self.chi_eligible = False
+        self.chi_instant = 0.0
         self.calc_steam_mass = (self.steam_voltage / 10.0) * self.MAX_CAPACITY
 
         cfm_nat = 1380.0 / 17.0
@@ -2112,7 +2189,10 @@ class HapsicController(hass.Hass):
             actual_grains = (self.duct_w - self.supply_w) * dry_air_mass_lbs_hr / 60.0
 
             # CHI Gating strictly evaluated off physical boil state
-            if theo_grains > 100 and self.boil_achieved and not self.stasis_active:
+            if (theo_grains > 100 and self.boil_achieved and not self.stasis_active
+                    and all(math.isfinite(v) for v in (actual_grains, theo_grains, self.supply_flow))
+                    and self.supply_flow > 0):
+                self.chi_eligible = True
                 self.chi_instant = actual_grains / theo_grains
                 self.chi_instant = max(0.0, min(2.0, self.chi_instant))
                 self.chi_ema = (self.chi_alpha * self.chi_instant) + ((1 - self.chi_alpha) * self.chi_ema)
@@ -2124,23 +2204,16 @@ class HapsicController(hass.Hass):
 
                 bin_idx = self._boiler_curve_bin_idx(self.steam_voltage)
                 if bin_idx >= 0 and actual_lbs_hr > 0:
-                    a = self.boiler_curve_alpha
-                    self.boiler_curve[bin_idx] = (
-                        a * actual_lbs_hr
-                        + (1 - a) * self.boiler_curve[bin_idx])
-                    self.boiler_curve_counts[bin_idx] += 1
+                    count = self.boiler_curve_counts[bin_idx]
+                    a = 1.0 / (count + 1) if count < self.BOILER_CURVE_MIN_SAMPLES else self.boiler_curve_alpha
+                    self.boiler_curve[bin_idx] += a * (actual_lbs_hr - self.boiler_curve[bin_idx])
+                    self.boiler_curve_counts[bin_idx] = min(count + 1, 0xffffffff)
 
-                # Persist CHI + boiler curve every 5 minutes (60 ticks)
-                if self.tick_counter % 60 == 0:
-                    self.call_service("input_number/set_value",
-                                      entity_id="input_number.hapsic_chi_ema",
-                                      value=round(self.chi_ema, 3))
-                    self.call_service("input_text/set_value",
-                                      entity_id="input_text.hapsic_boiler_curve",
-                                      value=json.dumps(
-                                          [round(v, 4) for v in self.boiler_curve]))
             else:
                 self.chi_instant = 0.0
+
+        if self.tick_counter % 60 == 0:
+            self._checkpoint_learning()
 
     def update_economy_advisory(self):
         """Observe periods where active steaming is not producing useful net flux.
@@ -2212,6 +2285,11 @@ class HapsicController(hass.Hass):
             self.economy_advisory_target_delta = 0.0
 
     def publish_telemetry(self):
+        self.calc_steam_mass = (self.steam_voltage / 10.0) * self.MAX_CAPACITY
+        if self.fsm_state == "FAULT":
+            self.boil_status = "UNKNOWN"
+        elif self.steam_voltage <= 0:
+            self.boil_status = "COLD"
         struct_vel = 0.0
         if len(self.room_dp_buffer) > 0:
             struct_vel = (self.room_dp - self.room_dp_buffer[0]) * 4
@@ -2269,13 +2347,16 @@ class HapsicController(hass.Hass):
                 "suggested_target_delta": round(self.economy_advisory_target_delta, 1),
             },
             "health": {
+                "math_revision": 2,
+                "chi_eligible": getattr(self, "chi_eligible", False),
                 "boil_status": getattr(self, 'boil_status', "COLD"),
-                "chi_ratio": round(self.chi_instant, 3) if hasattr(self, 'chi_instant') else 0.0,
+                "chi_ratio": round(self.chi_instant, 3) if getattr(self, "chi_eligible", False) else None,
                 "chi_ema": round(self.chi_ema, 3),
                 "boiler_curve": [round(v, 3) for v in self.boiler_curve],
                 "boiler_curve_samples": list(self.boiler_curve_counts),
                 "effective_max_capacity": round(self.get_effective_max_capacity(), 3),
-                "measured_steam_lbs_hr": round(getattr(self, '_last_measured_steam', 0.0), 3),
+                "measured_steam_lbs_hr": (round(self._last_measured_steam, 3)
+                                          if getattr(self, "chi_eligible", False) else None),
                 "production_efficiency": round(
                     (self._last_measured_steam / self.calc_steam_mass * 100.0)
                     if self.calc_steam_mass > 0.1 and getattr(self, '_last_measured_steam', 0.0) > 0.0
@@ -2284,4 +2365,10 @@ class HapsicController(hass.Hass):
             }
         }
 
-        self.call_service("mqtt/publish", topic="hapsic/telemetry/state", payload=json.dumps(payload))
+        def strict(value):
+            if isinstance(value, dict): return {key: strict(item) for key, item in value.items()}
+            if isinstance(value, list): return [strict(item) for item in value]
+            if isinstance(value, float) and not math.isfinite(value): return None
+            return value
+        self.call_service("mqtt/publish", topic="hapsic/telemetry/state",
+                          payload=json.dumps(strict(payload), allow_nan=False))

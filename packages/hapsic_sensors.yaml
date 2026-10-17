@@ -214,14 +214,20 @@ mqtt:
     - name: "HAPSIC Health Measured Steam"
       unique_id: hapsic_health_measured_steam
       state_topic: "hapsic/telemetry/state"
-      value_template: "{{ value_json.health.measured_steam_lbs_hr | round(2) }}"
+      availability_topic: "hapsic/telemetry/state"
+      availability_template: >-
+        {{ 'online' if value_json.health.measured_steam_lbs_hr is number and (value_json.health.get('math_revision', 1) < 2 or value_json.health.get('chi_eligible', false) is sameas true) else 'offline' }}
+      value_template: "{{ (value_json.health.measured_steam_lbs_hr) | round(2) if value_json.health.measured_steam_lbs_hr is number else none }}"
       unit_of_measurement: "lbs/hr"
       state_class: measurement
       icon: mdi:gauge-full
     - name: "HAPSIC Health Production Efficiency"
       unique_id: hapsic_health_production_efficiency
       state_topic: "hapsic/telemetry/state"
-      value_template: "{{ value_json.health.production_efficiency | round(1) }}"
+      availability_topic: "hapsic/telemetry/state"
+      availability_template: >-
+        {{ 'online' if value_json.health.production_efficiency is number and (value_json.health.get('math_revision', 1) < 2 or value_json.health.get('chi_eligible', false) is sameas true) else 'offline' }}
+      value_template: "{{ (value_json.health.production_efficiency) | round(1) if value_json.health.production_efficiency is number else none }}"
       unit_of_measurement: "%"
       icon: mdi:percent-circle
 
@@ -362,3 +368,9 @@ sensor:
     type: time
     start: "{{ now() - timedelta(days=7) }}"
     end: "{{ now() }}"
+
+# Versioned legacy control learning; omit initial so HA restores the saved state.
+input_text:
+  hapsic_boiler_curve:
+    name: HAPSIC Control Learning
+    max: 255
