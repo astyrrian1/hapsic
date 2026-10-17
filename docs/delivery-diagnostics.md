@@ -184,8 +184,13 @@ Python store into NVS. Configure broker ACLs for the chosen producer before cuto
 Implementation baseline: HAPSIC tag v2.7.4 (`f8adb98`, release tree matches
 `47af93e`); site consumer baseline `e87a10f`. The unrelated safety-remediation
 checkout and its dirty status file are excluded. AppDaemon add-on observed
-2026-10-17: version 0.19.2, started. Exact loaded HAPSIC version/module checksum
-could not be read from the SSH add-on mount and remains a rollout prerequisite.
+2026-10-17: version 0.19.2, started. The active module was subsequently located at
+`/homeassistant/appdaemon/apps/hapsic/hapsic_controller.py` with SHA256
+`ec1ef81056c5aa362011eb75483f43ed7e529b55a4307f90b17210dc32f4f3b8`;
+its controller AST matches v2.7.4. The add-on configuration points at
+`/homeassistant/appdaemon/apps/` and already has an MQTT plugin in namespace
+`mqtt`. Confirm this path again before rollout rather than assuming the HACS
+nested layout is the active copy.
 
 The live HA source check on 2026-10-17 confirmed F, %, m3/h and inHg units. The
 Shelly temperature source was >8 minutes old, exceeding the 120 s policy. Reporting

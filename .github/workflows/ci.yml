@@ -93,7 +93,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install native build dependencies
-        run: pip install -r requirements-dev.txt esphome==2026.1.5
+        # This job only needs ESPHome and the stdlib driver. ESPHome pins
+        # Paho 1.x; the separate Python-test job exercises the Paho 2.x tools.
+        run: pip install esphome==2026.1.5
       - name: Build the actual host controller
         run: |
           python3 scenario_builder.py
