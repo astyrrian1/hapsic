@@ -336,3 +336,100 @@ def test_ack_transport_failure_cannot_reject_a_durable_action(tmp_path):
     assert app.storage_error is None
     assert app._publish.call_args.args[1]["status"] == "accepted"
     app.terminate()
+
+
+def test_alert_contract_publishes_configured_thresholds_even_before_calibration():
+    result = engine().telemetry(1000)
+    assert result["alert"]["warning"] == 60
+    assert result["alert"]["recovery"] == 65
+
+
+def test_clock_loss_breaks_observed_off_continuity():
+    observer = engine()
+    observer.command("baseline_start")
+    advance(observer, 1000, 1200)
+    observer.observe(inputs(2205, 0, 30), 2205, 2205, synced=False)
+    advance(observer, 2210, 900)
+    assert not observer.review()["windows"]
+
+
+def test_raw_input_relay_preserves_source_observation_identity(tmp_path):
+    from unittest.mock import MagicMock
+
+    app = controller.HapsicDiagnostics()
+    app.args = {"data_path": str(tmp_path / "state.json")}
+    app.call_service = MagicMock()
+    app.listen_event = MagicMock()
+    app.initialize()
+    app.get_state = MagicMock(return_value={"state": "68", "last_reported": 1000,
+                                           "attributes": {"unit_of_measurement": "°F"}})
+    app._publish = MagicMock()
+    app.diagnostic_tick({})
+    packets = [call.args[1] for call in app._publish.call_args_list
+               if call.args[0].endswith("/inputs")]
+    assert packets, "Firmware needs source observations, not HA receipt timestamps"
+    first = packets[-1]["samples"]["upstream_t"]
+    assert (first["value"], first["unit"], first["reported_at"], first["report_id"]) == (68, "°F", 1000, "1000")
+    app.diagnostic_tick({})
+    second = [call.args[1] for call in app._publish.call_args_list
+              if call.args[0].endswith("/inputs")][-1]["samples"]["upstream_t"]
+    assert second == first, "Polling cached state must not manufacture another observation"
+    app.terminate()
+
+
+def test_known_full_canister_warning_hysteresis_and_episode_survive_restart():
+    observer, now = commissioned(known=True)
+    for _ in range(3):
+        advance(observer, now, 905, known=True)
+        now += 910
+        result = advance(observer, now, 3605, 9.5, 30, known=True)
+        now += 3610
+    assert result["canister"]["ready"] is True
+    assert result["canister"]["seconds"] == pytest.approx(7200)
+    assert result["alert"]["decision"] == "warn"
+    episode = result["alert"]["episode"]
+    warning_evidence = result["alert"]["evidence"]
+    assert warning_evidence["upper"] < 60
+    restored = engine()
+    restored.restore(observer.export_state())
+    result = restored.observe(inputs(now, 9.5, 30, known=True), now, now, synced=True)
+    assert result["alert"]["episode"] == episode
+    assert result["alert"]["decision"] == "warn"
+    assert result["alert"]["evidence"] == warning_evidence
+    for _ in range(3):
+        advance(restored, now, 905, known=True)
+        now += 910
+        result = advance(restored, now, 3605, 9.5, 50, known=True)
+        now += 3610
+    assert result["canister"]["seconds"] == pytest.approx(7200)
+    assert result["alert"]["decision"] == "clear"
+    assert result["alert"]["episode"] == episode
+    stale = restored.telemetry(now + 86401)
+    assert stale["canister"]["status"] == "stale"
+    assert stale["alert"]["decision"] == "inconclusive"
+
+
+def test_controller_outputs_and_learning_are_identical_with_observer_faults(monkeypatch):
+    from test_output_safety import make_controller
+
+    plain = make_controller()
+    observed = make_controller()
+    plain_calls, observed_calls = [], []
+    plain.call_service = lambda *args, **kwargs: plain_calls.append((args, kwargs))
+    observed.call_service = lambda *args, **kwargs: observed_calls.append((args, kwargs))
+    observer = engine()
+    now = 100000
+    monkeypatch.setattr(controller.time, "time", lambda: now)
+    for tick in range(500):
+        now += 5
+        for control in (plain, observed):
+            control.last_tick_ts = now - 5
+            control.master_tick({})
+        values = inputs(now, observed.steam_voltage)
+        if tick % 13 == 0: values["flow"]["value"] = math.nan
+        observer.observe(values, now, now, synced=tick % 17 != 0)
+        if tick % 19 == 0:
+            with pytest.raises(ValueError): observer.restore({"schema_version": 999})
+        for field in ("fsm_state", "steam_voltage", "chi_ema", "boiler_curve", "boiler_curve_counts"):
+            assert getattr(plain, field) == getattr(observed, field), field
+    assert plain_calls == observed_calls

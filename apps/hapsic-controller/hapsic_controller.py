@@ -27,7 +27,7 @@ class DeliveryObserver:
 
     AIR_KEYS = ("upstream_t", "upstream_rh", "downstream_t", "downstream_rh", "flow")
     KEYS = AIR_KEYS + ("pressure", "command")
-    DEFAULTS = dict(airflow_basis="unverified", reporting_verified=False,
+    DEFAULTS = dict(algorithm_version="delivery-si-1", airflow_basis="unverified", reporting_verified=False,
                     max_age=120.0, pressure_max_age=900.0, max_skew=30.0,
                     minimum_reports=3, stable_seconds=300.0, warmup_seconds=900.0,
                     off_seconds=900.0, baseline_seconds=600.0, minimum_flow=50.0,
@@ -72,6 +72,7 @@ class DeliveryObserver:
         self.last_valid = {}
         self.alert_episode = 0
         self.alert_active = False
+        self.alert_snapshot = None
         self.exclusions = {}
         self.cursors = {}
         self.source_identity = None
@@ -226,6 +227,23 @@ class DeliveryObserver:
         self.reason = reason
         self.exclusions[reason] = self.exclusions.get(reason, 0) + 1
 
+    def _quarantine(self):
+        # Preserve unscored mass/time summaries by cycle, not a second full ring.
+        # Ambiguous UTC is never used again for retention or scoring.
+        grouped = {}
+        for block in self.evidence:
+            cycle = block["cycle"]
+            if cycle not in grouped:
+                grouped[cycle] = deepcopy(block)
+                continue
+            merged = grouped[cycle]
+            total = merged["seconds"] + block["seconds"]
+            for key in ("measured", "lower", "upper", "reference", "reference_lower", "reference_upper"):
+                merged[key] = ((merged[key] * merged["seconds"] + block[key] * block["seconds"]) / total
+                               if merged[key] is not None and block[key] is not None else None)
+            merged.update(end=block["end"], seconds=total)
+        if grouped: self.quarantined_evidence = list(grouped.values())
+
     def _clock(self, mono, utc, synced):
         if self.last_mono is not None and mono <= self.last_mono: return False
         self.last_mono = mono
@@ -239,19 +257,20 @@ class DeliveryObserver:
             self.clock_valid = False
             self.clock_anchor = utc - mono
             self.clock_recovery = mono
-            self.quarantined_evidence = list(self.evidence)
+            self._quarantine()
             self.evidence.clear()
         elif self.clock_recovery is not None and mono - self.clock_recovery >= 30:
             self.clock_valid = True
             self.clock_recovery = None
         self.last_utc = utc
         if self.clock_valid and self.evidence and self.evidence[-1]["end"] > utc + 5:
-            self.quarantined_evidence = list(self.evidence)
+            self._quarantine()
             self.evidence.clear()
         return self.clock_valid
 
     def observe(self, snapshot, mono, utc, *, synced=False):
         if not self._clock(mono, utc, synced):
+            self.zero_since = self.demand_since = None
             self.interrupt("CLOCK_UNSYNCHRONIZED")
             return self.telemetry(utc)
         result = self.measure(snapshot, utc)
@@ -261,7 +280,8 @@ class DeliveryObserver:
             self.demand_since = None
             self.interrupt(result["reason"] if not result["eligible"] else "LOW_FLOW")
             return self.telemetry(utc)
-        identity = {key: snapshot[key].get("source") for key in self.KEYS if key in snapshot}
+        identity = {key: [snapshot[key].get(field) for field in ("source", "unit", "accuracy")]
+                    for key in self.KEYS if key in snapshot}
         if self.source_identity is not None and identity != self.source_identity:
             self.command("baseline_reset")
             self.source_identity = identity
@@ -401,6 +421,9 @@ class DeliveryObserver:
                 self.reference = deepcopy(candidate)
             self.candidate = None
             self.evidence.clear()
+            self.quarantined_evidence.clear()
+            self.alert_active = False
+            self.alert_snapshot = None
             self.last_valid.clear()
             self.interrupt("CALIBRATION_ACCEPTED")
         elif action in ("baseline_reset", "reference_reset"):
@@ -411,6 +434,9 @@ class DeliveryObserver:
                 self.generation = sha256(f"{self.config_id}:{self.revision}".encode()).hexdigest()[:16]
             self.reference = self.candidate = None
             self.evidence.clear()
+            self.quarantined_evidence.clear()
+            self.alert_active = False
+            self.alert_snapshot = None
             self.last_valid.clear()
             self.interrupt("CALIBRATION_RESET")
         else:
@@ -540,7 +566,9 @@ class DeliveryObserver:
         decision = "inconclusive"
         if canister["status"] == "valid" and canister["ready"]:
             if canister["upper"] < self.config["warning"]:
-                if not self.alert_active: self.alert_episode += 1
+                if not self.alert_active:
+                    self.alert_episode += 1
+                    self.alert_snapshot = deepcopy(canister)
                 self.alert_active = True
                 decision = "warn"
             elif canister["lower"] > self.config["recovery"]:
@@ -551,16 +579,21 @@ class DeliveryObserver:
                 self.last_valid[key] = {**metric, "at": (self.evidence[-1]["end"] if key == "canister"
                                                         else self.delivery_window[-1]["end"])}
         return dict(schema_version=1, generation=self.generation, clock_valid=self.clock_valid,
+                    observed_at=max(self.last_measurement.get("source_times", []), default=None),
+                    source_contract=deepcopy(self.source_identity),
                     measurement=deepcopy(self.last_measurement),
                     qualification=dict(stable=self.reason == "QUALIFIED", reason=self.reason,
                                        qualified_seconds=self.qualified_seconds, cycle_id=self.cycle),
                     calibration=dict(status=("uncalibrated" if not self.reference else
                                              "valid" if self.baseline["uncertainty_known"] else "provisional"),
                                      reference_id=self.reference["revision"] if self.reference else None,
+                                     baseline=deepcopy(self.baseline), reference=deepcopy(self.reference),
                                      coverage=list(self.reference["bins"]) if self.reference else [],
                                      candidate=self.review()),
                     delivery=delivery, canister=canister, last_valid=deepcopy(self.last_valid),
-                    alert=dict(decision=decision, episode=self.alert_episode, active=self.alert_active),
+                    alert=dict(decision=decision, episode=self.alert_episode, active=self.alert_active,
+                               warning=self.config["warning"], recovery=self.config["recovery"],
+                               evidence=deepcopy(self.alert_snapshot)),
                     exclusions=dict(self.exclusions))
 
     def export_state(self):
@@ -571,7 +604,7 @@ class DeliveryObserver:
                              source_identity=self.source_identity,
                              off_period_open=self.off_period_open, quarantined_evidence=self.quarantined_evidence,
                              last_valid=self.last_valid, alert_episode=self.alert_episode,
-                             alert_active=self.alert_active))
+                             alert_active=self.alert_active, alert_snapshot=self.alert_snapshot))
 
     def restore(self, state):
         if (state.get("schema_version") != 1 or state.get("config_id") != self.config_id
@@ -582,7 +615,7 @@ class DeliveryObserver:
         self._validate_state(state)
         for key in ("generation", "revision", "baseline", "reference", "candidate", "cursors", "cycle", "off_period",
                     "last_valid", "alert_episode", "alert_active", "source_identity", "off_period_open",
-                    "quarantined_evidence"):
+                    "quarantined_evidence", "alert_snapshot"):
             setattr(self, key, state[key])
         self.evidence = deque(state["evidence"])
         self.archives = deque(state["archives"], maxlen=4)
@@ -597,6 +630,12 @@ class DeliveryObserver:
             if not isinstance(state["generation"], str) or len(state["generation"]) != 16:
                 raise ValueError("Invalid generation")
             if type(state["alert_active"]) is not bool: raise ValueError("Invalid alert")
+            alert = state["alert_snapshot"]
+            if alert is not None and (not isinstance(alert, dict) or alert.get("status") != "valid"
+                                      or not all(cls._finite(alert.get(k)) for k in ("value", "lower", "upper"))
+                                      or not alert["lower"] <= alert["value"] <= alert["upper"]
+                                      or alert.get("seconds", 0) < 7200 or alert.get("cycles", 0) < 3):
+                raise ValueError("Invalid warning evidence")
             if type(state["off_period_open"]) is not bool: raise ValueError("Invalid period")
             if not isinstance(state["quarantined_evidence"], list): raise ValueError("Invalid quarantine")
             if not isinstance(state["cursors"], dict) or not isinstance(state["last_valid"], dict):
@@ -703,7 +742,10 @@ class HapsicDiagnostics(hass.Hass):
         self.sources = {key: {"entity": entity, **self.args.get("sources", {}).get(key, {})}
                         for key, entity in self.SOURCES.items()}
         self.observer = DeliveryObserver({**self.args.get("diagnostic_config", {}), "sources": self.sources})
-        self.store = DiagnosticStore(self.args.get("data_path", "/config/hapsic-data/diagnostics-v1.json"))
+        base_path = Path(self.args.get("data_path", "/config/hapsic-data/diagnostics-v1.json"))
+        # A changed binding/policy never overwrites the previous configuration's history.
+        self.store = DiagnosticStore(base_path.with_name(
+            f"{base_path.stem}-{self.observer.config_id}{base_path.suffix}"))
         self.commands = queue.Queue(maxsize=16)
         self.requests = deque(maxlen=64)
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hapsic-diagnostic-storage")
@@ -750,7 +792,14 @@ class HapsicDiagnostics(hass.Hass):
                 if (payload.get("schema_version") != 1 or payload.get("producer_id") != self.producer
                         or not isinstance(payload.get("request_id"), str) or len(payload["request_id"]) > 128):
                     raise ValueError("Invalid diagnostic command envelope")
-                if payload["request_id"] in self.requests: return
+                if payload["request_id"] in self.requests:
+                    self._ack(dict(schema_version=1, producer_id=self.producer,
+                                   request_id=payload["request_id"], status="accepted"))
+                    return
+                if (not payload["request_id"] or "\0" in payload["request_id"]
+                        or not DeliveryObserver._finite(payload.get("issued_at"))
+                        or not -5 <= time.time() - payload["issued_at"] <= 30):
+                    raise ValueError("Expired command")
                 self.commands.put_nowait((time.monotonic(), payload))
         except (ValueError, TypeError, KeyError, queue.Full):
             self.observer.interrupt("MESSAGE_REJECTED")
@@ -771,6 +820,7 @@ class HapsicDiagnostics(hass.Hass):
             timestamp = attrs.get(field, state.get(field))
             try:
                 value = float(state["state"])
+                if not math.isfinite(value): continue
                 unit = attrs.get("unit_of_measurement", binding.get("unit"))
                 snapshot[key] = dict(value=value, unit=unit, reported_at=self._timestamp(timestamp),
                                      report_id=str(timestamp), source=binding["entity"],
@@ -829,18 +879,22 @@ class HapsicDiagnostics(hass.Hass):
                 except (ValueError, KeyError):
                     self._publish(self.topic + "/ack", {**ack, "status": "rejected", "reason": "INVALID_ACTION"})
             now, mono = time.time(), time.monotonic()
+            snapshot = self._snapshot()
+            self.sequence += 1
+            self._publish(self.topic + "/inputs", dict(
+                schema_version=1, producer_id=self.producer, boot_id=self.boot_id,
+                sequence=self.sequence, published_at=now, samples=snapshot))
             accepting = self.pending_save is not None and self.pending_save[1] is not None
             if accepting:
                 payload = self.observer.telemetry(now)
             else:
-                payload = self.observer.observe(self._snapshot(), mono, now,
+                payload = self.observer.observe(snapshot, mono, now,
                                                 synced=self.args.get("clock_verified", False))
             if self.pending_save is None and mono - self.last_checkpoint >= 300:
                 state = self.observer.export_state()
                 state["requests"] = list(self.requests)
                 self.pending_save = (self.worker.submit(self.store.save, state), None, None)
                 self.last_checkpoint = mono
-            self.sequence += 1
             payload.update(producer_id=self.producer, boot_id=self.boot_id, sequence=self.sequence,
                            published_at=now, storage_error=self.storage_error)
             self._publish(self.topic, payload)
