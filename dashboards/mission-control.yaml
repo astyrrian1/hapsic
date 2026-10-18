@@ -12,26 +12,81 @@ views:
               {{ states('sensor.hapsic_fsm_state') | upper }} • Target {{
               states('input_number.target_dew_point') }} °F DP • {{
               states('sensor.hapsic_fault_reason') }}
-          - type: entities
-            title: Delivery measurement and calibration
-            entities:
-              - sensor.hapsic_estimated_steam_delivery
-              - sensor.hapsic_measurement_status
-              - sensor.hapsic_delivery_performance
-              - sensor.hapsic_canister_performance
-              - sensor.hapsic_diagnostic_calibration
-              - sensor.hapsic_diagnostic_qualification
-              - sensor.hapsic_canister_evidence_hours
-              - sensor.hapsic_diagnostic_evidence_age
-              - sensor.hapsic_last_observed_delivery_age
-              - sensor.hapsic_diagnostic_exclusions
-              - script.hapsic_diagnostic_action
           - type: markdown
-            content: >-
-              Delivery is an estimate between the two sensor locations. Performance
-              requires an accepted healthy reference and matching conditions.
-              Provisional or insufficient data does not establish canister condition.
-              Review the calibration entity attributes before accepting its candidate revision.
+            title: Delivery measurement and calibration
+            content: |
+              {% set online = states('sensor.hapsic_diagnostics_producer') not in ['unknown', 'unavailable', ''] %}
+              {% set calibration = states('sensor.hapsic_diagnostic_calibration') %}
+              {% set reason = states('sensor.hapsic_diagnostic_qualification') %}
+              {% set explanations = {
+                'CLOCK_UNSYNCHRONIZED': 'Observation timing has not been verified.',
+                'UNVERIFIED_PROVENANCE_OR_AIRFLOW': 'Sensor reporting and airflow units have not been verified.',
+                'INVALID_OR_MISSING_SOURCE': 'A required measurement is missing or invalid.',
+                'LOW_FLOW': 'Airflow is too low for delivery qualification.',
+                'WARMUP': 'Waiting for warmup to finish.',
+                'STABILIZING': 'Waiting for five minutes of stable operating conditions.',
+                'OUTSIDE_BASELINE_ENVELOPE': 'Current conditions are outside the accepted baseline range.',
+                'MEASUREMENT_MISMATCH': 'Measurements disagree beyond the documented uncertainty.',
+                'STORAGE_ERROR': 'Diagnostic evidence storage needs attention.'
+              } %}
+              {% macro reading(entity, unit, precision=1) -%}
+                {%- set value = states(entity) -%}
+                {%- if online and is_number(value) -%}
+                  {{- ('%.' ~ precision ~ 'f') | format(value | float) -}}{{- unit -}}
+                  {%- if state_attr(entity, 'status') == 'provisional' %} (provisional){% endif -%}
+                {%- elif online and state_attr(entity, 'status') == 'stale' -%}
+                  Stale — waiting for recent evidence
+                {%- else -%}
+                  Not available yet
+                {%- endif -%}
+              {%- endmacro %}
+              {% if not online %}
+              **Waiting for diagnostic producer**
+
+              Delivery diagnostics have not connected or their updates have expired.
+              {% elif calibration == 'uncalibrated' %}
+              **Commissioning required**
+
+              {{ explanations.get(reason, 'Waiting for verified inputs, a baseline and an owner-confirmed healthy reference.') }}
+              {% elif calibration == 'provisional' %}
+              **Provisional reference — measurement accuracy is not yet established**
+
+              {{ explanations.get(reason, 'Results are empirical estimates under comparable operating conditions.') }}
+              {% elif calibration == 'valid' %}
+              **Delivery diagnostics**
+
+              {{ explanations.get(reason, 'Results use the accepted reference where operating conditions match.') }}
+              {% else %}
+              **Waiting for calibration status**
+
+              Diagnostic updates are arriving, but calibration information is not available yet.
+              {% endif %}
+
+              | Measurement | Current result |
+              | :--- | :--- |
+              | Estimated steam delivery | {{ reading('sensor.hapsic_estimated_steam_delivery_imperial', ' lb/h', 2) }} |
+              | Delivery performance | {{ reading('sensor.hapsic_delivery_performance', '%') }} |
+              | Canister performance | {{ reading('sensor.hapsic_canister_performance', '%') }} |
+
+              **Baseline:** {{ 'Accepted' if online and state_attr('sensor.hapsic_diagnostic_calibration', 'baseline') is mapping else 'Not collected yet' }}
+
+              **Healthy reference:** {{ 'Accepted' if online and state_attr('sensor.hapsic_diagnostic_calibration', 'reference') is mapping else 'Not accepted yet' }}
+
+              **High-demand evidence:** {{ reading('sensor.hapsic_canister_evidence_hours', ' h', 2) }}
+
+              {% set age = states('sensor.hapsic_diagnostic_evidence_age') %}
+              **Newest canister evidence:** {{ ((age | float / 3600) | round(1) | string) ~ ' h ago' if online and is_number(age) and age | float >= 0 else 'No eligible evidence yet' }}
+
+              {% set coverage = state_attr('sensor.hapsic_diagnostic_calibration', 'coverage') %}
+              **Reference coverage:** {{ coverage | length if online and coverage is sequence and coverage is not string else 0 }} accepted demand bins.
+
+              {% set lower = state_attr('sensor.hapsic_delivery_performance', 'lower') %}
+              {% set upper = state_attr('sensor.hapsic_delivery_performance', 'upper') %}
+              **Delivery uncertainty:** {{ (lower | round(1) | string) ~ '–' ~ (upper | round(1) | string) ~ '%' if online and is_number(lower) and is_number(upper) else 'No verified bounds yet' }}
+
+              Delivery is an estimate between sensor locations. Performance requires
+              comparable conditions and an accepted healthy reference. Missing
+              evidence does not indicate poor canister condition.
           - type: conditional
             conditions:
               - condition: state
@@ -100,9 +155,14 @@ views:
                   red: 5.5
               - type: vertical-stack
                 cards:
-                  - type: tile
+                  - type: custom:mushroom-template-card
                     entity: sensor.hapsic_canister_performance
-                    name: Canister Performance
+                    primary: Canister Performance
+                    secondary: >-
+                      {{ states(entity) ~ '%' if is_number(states(entity)) else ('Commissioning required' if states('sensor.hapsic_diagnostic_calibration') == 'uncalibrated' else 'No eligible result yet') }}
+                    icon: mdi:gauge
+                    tap_action:
+                      action: more-info
                   - type: markdown
                     content: >
                       <center><b>Boiler State:</b> <span style="color: {% if
@@ -124,23 +184,22 @@ views:
                   {% set val = states('sensor.hapsic_steam_mass')|float(0) %}
                   {% if val > 0 %} blue {% else %} grey {% endif %}
                 state_content: state
-              - type: tile
+              - type: custom:mushroom-template-card
                 entity: sensor.hapsic_estimated_steam_delivery_imperial
-                name: Estimated Steam Delivery
+                primary: Estimated Steam Delivery
+                secondary: >-
+                  {{ states(entity) ~ ' lb/h' if is_number(states(entity)) else ('Commissioning required' if states('sensor.hapsic_diagnostic_calibration') == 'uncalibrated' else 'No eligible result yet') }}
                 icon: mdi:gauge-full
-                color: >-
-                  {% set val = states('sensor.hapsic_estimated_steam_delivery_imperial')|float(0) %}
-                  {% if val > 0 %} green {% else %} grey {% endif %}
-                state_content: state
-              - type: tile
+                tap_action:
+                  action: more-info
+              - type: custom:mushroom-template-card
                 entity: sensor.hapsic_delivery_performance
-                name: Delivery Performance
+                primary: Delivery Performance
+                secondary: >-
+                  {{ states(entity) ~ '%' if is_number(states(entity)) else ('Commissioning required' if states('sensor.hapsic_diagnostic_calibration') == 'uncalibrated' else 'No eligible result yet') }}
                 icon: mdi:percent-circle
-                color: >-
-                  {% set val = states('sensor.hapsic_delivery_performance')|float(0) %}
-                  {% if val > 90 %} green {% elif val > 60 %} orange
-                  {% elif val > 0 %} red {% else %} grey {% endif %}
-                state_content: state
+                tap_action:
+                  action: more-info
               - type: tile
                 entity: sensor.hapsic_boil_status
                 name: Boiler State
@@ -209,7 +268,7 @@ views:
               - decimals: 0
           - type: markdown
             title: Boiler Curve (Learned)
-            content: >
+            content: |
               {% set curve = states('input_text.hapsic_boiler_curve') %}
               {% set record = curve | from_json(none) %}
               {% if record is mapping and record.get('v') == 2 %}
@@ -241,6 +300,15 @@ views:
               | **Capacity (lb/hr)** | {{ '%.2f'|format(b0) }} | {{ '%.2f'|format(b1) }} | {{ '%.2f'|format(b2) }} | {{ '%.2f'|format(b3) }} |
               | **Samples** | {{ c0 }} | {{ c1 }} | {{ c2 }} | {{ c3 }} |
               | **Bar** | {{ '█' * ([40, [0, (b0*10)|int]|max]|min) }} | {{ '█' * ([40, [0, (b1*10)|int]|max]|min) }} | {{ '█' * ([40, [0, (b2*10)|int]|max]|min) }} | {{ '█' * ([40, [0, (b3*10)|int]|max]|min) }} |
+
+              {% if counts is not none and c0 == 0 and c1 == 0 and c2 == 0 and c3 == 0 %}
+              **Not trained yet.** New bins need 50 eligible positive observations
+              before control can use their learned capacity.
+              {% elif counts is none %}
+              Legacy curve: training counts are unavailable.
+              {% else %}
+              Bins need 50 eligible positive observations before control uses them.
+              {% endif %}
           - type: custom:apexcharts-card
             header:
               show: true

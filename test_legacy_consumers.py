@@ -208,3 +208,84 @@ def test_mission_control_handles_malformed_bins_without_template_errors():
     rendered_card = render_boiler_curve(record)
     assert "| **Capacity (lb/hr)** | 0.00 | 2.00 | 0.00 | 4.00 |" in rendered_card
     assert "| **Samples** | 1 | 2 | — | 4 |" in rendered_card
+
+
+def test_boiler_curve_preserves_markdown_table_rows():
+    rendered_card = render_boiler_curve('{"v":2,"curve":[0,0,0,0],"counts":[0,0,0,0]}')
+    rows = [line.strip() for line in rendered_card.splitlines() if line.strip().startswith("|")]
+    assert len(rows) == 5, "The Markdown renderer needs five separate table lines"
+    assert all(len(row.split("|")) == 7 for row in rows)
+    assert "not trained" in rendered_card.lower()
+
+
+def diagnostic_card():
+    dashboard = yaml.safe_load((ROOT / "dashboards/mission-control.yaml").read_text())
+    return next(card for card in dashboard_cards(dashboard)
+                if card.get("title") == "Delivery measurement and calibration")
+
+
+def render_diagnostic_card(values=None, attributes=None):
+    values = {"sensor.hapsic_diagnostics_producer": "hapsic-python", **(values or {})}
+    attributes = attributes or {}
+    environment = Environment()
+    environment.globals["is_number"] = is_number
+    return environment.from_string(diagnostic_card().get("content", "")).render(
+        states=lambda entity: values.get(entity, "unknown"),
+        state_attr=lambda entity, key: attributes.get(entity, {}).get(key),
+    )
+
+
+def test_diagnostics_explain_uncommissioned_inputs_without_unknown_numbers():
+    rendered_card = render_diagnostic_card({
+        "sensor.hapsic_diagnostic_calibration": "uncalibrated",
+        "sensor.hapsic_diagnostic_qualification": "CLOCK_UNSYNCHRONIZED",
+    })
+    assert "Commissioning required" in rendered_card
+    assert "Observation timing has not been verified" in rendered_card
+    assert "Not available yet" in rendered_card
+    assert "unknown" not in rendered_card.lower()
+    assert "0.0%" not in rendered_card
+
+
+def test_diagnostics_preserve_zero_above_hundred_and_provisional_status():
+    rendered_card = render_diagnostic_card({
+        "sensor.hapsic_estimated_steam_delivery_imperial": "0.0",
+        "sensor.hapsic_delivery_performance": "132.0",
+        "sensor.hapsic_canister_performance": "60.0",
+        "sensor.hapsic_diagnostic_calibration": "provisional",
+    }, {"sensor.hapsic_canister_performance": {"status": "provisional"}})
+    assert "0.00 lb/h" in rendered_card
+    assert "132.0%" in rendered_card
+    assert "provisional" in rendered_card.lower()
+
+
+def test_diagnostics_offline_and_stale_states_do_not_look_current():
+    offline = render_diagnostic_card({"sensor.hapsic_diagnostics_producer": "unavailable"})
+    assert "Waiting for diagnostic producer" in offline
+    stale = render_diagnostic_card({}, {"sensor.hapsic_canister_performance": {"status": "stale"}})
+    assert "Stale" in stale
+
+
+def test_missing_calibration_state_never_claims_an_accepted_reference():
+    rendered_card = render_diagnostic_card()
+    assert "Waiting for calibration status" in rendered_card
+    assert "Results use the accepted reference" not in rendered_card
+
+
+def test_diagnostic_tiles_have_readable_empty_states():
+    dashboard = yaml.safe_load((ROOT / "dashboards/mission-control.yaml").read_text())
+    entities = {"sensor.hapsic_canister_performance", "sensor.hapsic_delivery_performance",
+                "sensor.hapsic_estimated_steam_delivery_imperial"}
+    tiles = [card for card in dashboard_cards(dashboard)
+             if card.get("type") in {"tile", "custom:mushroom-template-card"}
+             and isinstance(card.get("entity"), str) and card["entity"] in entities]
+    assert len(tiles) == 3
+    environment = Environment()
+    environment.globals["is_number"] = is_number
+    for tile in tiles:
+        assert tile["type"] == "custom:mushroom-template-card"
+        secondary = environment.from_string(tile["secondary"]).render(
+            entity=tile["entity"],
+            states=lambda entity: "uncalibrated" if entity == "sensor.hapsic_diagnostic_calibration" else "unknown")
+        assert "unknown" not in secondary.lower()
+        assert "Commissioning required" in secondary
