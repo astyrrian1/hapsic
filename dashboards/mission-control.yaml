@@ -295,11 +295,12 @@ views:
               {% set c1 = counts[1] if counts is not none and counts[1] is number else '—' %}
               {% set c2 = counts[2] if counts is not none and counts[2] is number else '—' %}
               {% set c3 = counts[3] if counts is not none and counts[3] is number else '—' %}
-              | Voltage Band | 2-4V | 4-6V | 6-8V | 8-10V |
-              | :---: | :---: | :---: | :---: | :---: |
-              | **Capacity (lb/hr)** | {{ '%.2f'|format(b0) }} | {{ '%.2f'|format(b1) }} | {{ '%.2f'|format(b2) }} | {{ '%.2f'|format(b3) }} |
-              | **Samples** | {{ c0 }} | {{ c1 }} | {{ c2 }} | {{ c3 }} |
-              | **Bar** | {{ '█' * ([40, [0, (b0*10)|int]|max]|min) }} | {{ '█' * ([40, [0, (b1*10)|int]|max]|min) }} | {{ '█' * ([40, [0, (b2*10)|int]|max]|min) }} | {{ '█' * ([40, [0, (b3*10)|int]|max]|min) }} |
+              | Command band | Capacity (lb/hr) | Samples |
+              | :--- | ---: | ---: |
+              | 2-4V | {{ '%.2f'|format(b0) }} | {{ c0 }} |
+              | 4-6V | {{ '%.2f'|format(b1) }} | {{ c1 }} |
+              | 6-8V | {{ '%.2f'|format(b2) }} | {{ c2 }} |
+              | 8-10V | {{ '%.2f'|format(b3) }} | {{ c3 }} |
 
               {% if counts is not none and c0 == 0 and c1 == 0 and c2 == 0 and c3 == 0 %}
               **Not trained yet.** New bins need 50 eligible positive observations
