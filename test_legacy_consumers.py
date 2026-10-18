@@ -185,13 +185,11 @@ def test_learning_helper_has_capacity_and_restores_previous_state(name, director
 )
 def test_mission_control_renders_legacy_and_counted_learning_records(record, expected_rates, expected_counts):
     rendered_card = render_boiler_curve(record)
-    assert "| **Capacity (lb/hr)** | " + " | ".join(f"{value:.2f}" for value in expected_rates) + " |" in rendered_card
-    if expected_counts is None:
-        assert "| **Samples** | — | — | — | — |" in rendered_card
-    else:
-        assert "| **Samples** | " + " | ".join(str(value) for value in expected_counts) + " |" in rendered_card
-    assert "2-4V" in rendered_card
-    assert "4-6V" in rendered_card
+    for index, band in enumerate(("2-4V", "4-6V", "6-8V", "8-10V")):
+        count = "—" if expected_counts is None else str(expected_counts[index])
+        assert f"| {band} | {expected_rates[index]:.2f} | {count} |" in rendered_card
+    assert "Capacity (lb/hr)" in rendered_card
+
 
 
 @pytest.mark.parametrize(
@@ -200,22 +198,34 @@ def test_mission_control_renders_legacy_and_counted_learning_records(record, exp
 )
 def test_mission_control_falls_back_safely_for_malformed_learning_records(record):
     rendered_card = render_boiler_curve(record)
-    assert "| **Capacity (lb/hr)** | 0.00 | 0.00 | 0.00 | 0.00 |" in rendered_card
+    for band in ("2-4V", "4-6V", "6-8V", "8-10V"):
+        assert f"| {band} | 0.00 |" in rendered_card
 
 
 def test_mission_control_handles_malformed_bins_without_template_errors():
     record = '{"v":2,"curve":[null,2,"bad",4],"counts":[1,2,"bad",4]}'
     rendered_card = render_boiler_curve(record)
-    assert "| **Capacity (lb/hr)** | 0.00 | 2.00 | 0.00 | 4.00 |" in rendered_card
-    assert "| **Samples** | 1 | 2 | — | 4 |" in rendered_card
+    for band, value, count in (("2-4V", "0.00", "1"), ("4-6V", "2.00", "2"),
+                               ("6-8V", "0.00", "—"), ("8-10V", "4.00", "4")):
+        assert f"| {band} | {value} | {count} |" in rendered_card
 
 
 def test_boiler_curve_preserves_markdown_table_rows():
     rendered_card = render_boiler_curve('{"v":2,"curve":[0,0,0,0],"counts":[0,0,0,0]}')
     rows = [line.strip() for line in rendered_card.splitlines() if line.strip().startswith("|")]
-    assert len(rows) == 5, "The Markdown renderer needs five separate table lines"
-    assert all(len(row.split("|")) == 7 for row in rows)
+    assert len(rows) == 6, "The compact table needs a header, separator and four bins"
+    assert all(len(row.split("|")) == 5 for row in rows)
     assert "not trained" in rendered_card.lower()
+
+
+def test_populated_boiler_curve_has_no_unbreakable_text_bars():
+    record = json.dumps({"v": 2, "curve": [4.3, 4.17, 3.97, 3.56],
+                         "counts": [6, 122, 1584, 1121]})
+    rendered_card = render_boiler_curve(record)
+    assert "█" not in rendered_card, "Text bars overflow narrow dashboard cards"
+    rows = [line for line in rendered_card.splitlines() if line.strip().startswith("|")]
+    assert len(rows) == 6
+    assert all(len(row.split("|")) == 5 for row in rows)
 
 
 def diagnostic_card():
