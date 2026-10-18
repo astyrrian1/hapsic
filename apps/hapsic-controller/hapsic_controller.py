@@ -752,7 +752,7 @@ class HapsicDiagnostics(hass.Hass):
         self.mqtt_online = None
         self.sequence = 0
         self.producer = self.args.get("producer_id", "hapsic-python")
-        self.namespace = self.args.get("mqtt_namespace", "mqtt")
+        self.mqtt_namespace = self.args.get("mqtt_namespace", "mqtt")
         self.topic = self.args.get("diagnostics_topic", "hapsic/telemetry/diagnostics")
         self.control_topic = self.args.get("control_topic", "hapsic/telemetry/state")
         self.sources = {key: {"entity": entity, **self.args.get("sources", {}).get(key, {})}
@@ -780,13 +780,13 @@ class HapsicDiagnostics(hass.Hass):
             self.storage_error = type(error).__name__
             self.log(f"Diagnostic storage rejected: {type(error).__name__}; commissioning required", level="WARNING")
         try:
-            self.listen_event(self.diagnostic_connectivity, "MQTT_MESSAGE", namespace=self.namespace)
+            self.listen_event(self.diagnostic_connectivity, "MQTT_MESSAGE", namespace=self.mqtt_namespace)
         except Exception as error:
             self.log(f"Diagnostic connection events unavailable: {type(error).__name__}", level="WARNING")
         for topic in (self.control_topic, self.topic + "/command"):
             try:
-                self.call_service("mqtt/subscribe", namespace=self.namespace, topic=topic)
-                self.listen_event(self.diagnostic_message, "MQTT_MESSAGE", namespace=self.namespace, topic=topic)
+                self.call_service("mqtt/subscribe", namespace=self.mqtt_namespace, topic=topic)
+                self.listen_event(self.diagnostic_message, "MQTT_MESSAGE", namespace=self.mqtt_namespace, topic=topic)
             except Exception as error:
                 self.log(f"Diagnostic MQTT unavailable: {type(error).__name__}", level="WARNING")
         self.run_every(self.diagnostic_tick, "now", 5)
@@ -802,7 +802,7 @@ class HapsicDiagnostics(hass.Hass):
             self.connection_revision += 1
             for topic in (self.control_topic, self.topic + "/command"):
                 try:
-                    self.call_service("mqtt/subscribe", namespace=self.namespace, topic=topic)
+                    self.call_service("mqtt/subscribe", namespace=self.mqtt_namespace, topic=topic)
                 except Exception as error:
                     self.log(f"Diagnostic resubscribe failed: {type(error).__name__}", level="WARNING")
 
@@ -876,7 +876,7 @@ class HapsicDiagnostics(hass.Hass):
 
     def _publish(self, topic, payload):
         if self.mqtt_online is False: raise RuntimeError("Diagnostic MQTT disconnected")
-        self.call_service("mqtt/publish", namespace=self.namespace, topic=topic, retain=False, qos=0,
+        self.call_service("mqtt/publish", namespace=self.mqtt_namespace, topic=topic, retain=False, qos=0,
                           payload=json.dumps(payload, allow_nan=False, separators=(",", ":")))
 
     def _save_completed(self):

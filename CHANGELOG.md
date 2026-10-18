@@ -5,6 +5,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Keep the diagnostic observer's Home Assistant namespace separate from its MQTT namespace so sensor inputs remain visible when MQTT uses a dedicated namespace.
+
 ## [v2.8.1] — 2026-10-17
 
 ### Fixed
