@@ -5,8 +5,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v2.8.2] — 2026-10-18
+
 ### Fixed
-- Keep the diagnostic observer's Home Assistant namespace separate from its MQTT namespace so sensor inputs remain visible when MQTT uses a dedicated namespace.
+- Keep the diagnostic observer's Home Assistant namespace separate from its MQTT
+  namespace so sensor inputs remain visible when MQTT uses a dedicated namespace.
+- Keep populated boiler curves within narrow Mission Control cards: use one
+  commanded-voltage band per row and remove the oversized decorative text bars.
+  Capacity, actual training counts and legacy-record compatibility are preserved.
+
+### Deployment Notes
+Update the copied dashboard YAML to apply the layout fix. HACS does not replace
+manually installed dashboards. Restart AppDaemon after a HACS update to load the
+corrected observer adapter. Control calculations and firmware behavior are unchanged.
 
 ## [v2.8.1] — 2026-10-17
 
