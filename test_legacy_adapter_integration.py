@@ -116,6 +116,34 @@ def _owned_state(app):
     return {field: copy.deepcopy(getattr(app, field)) for field in fields}
 
 
+def test_diagnostic_mqtt_configuration_preserves_home_assistant_namespace(tmp_path):
+    clock = _Clock()
+    harness = _AppDaemonHarness(clock)
+    app = controller.HapsicDiagnostics()
+    app.namespace = "default"
+    app.args = dict(data_path=str(tmp_path / "diagnostics.json"), mqtt_namespace="mqtt")
+    app.run_every = harness.schedule
+    app.listen_event = harness.listen
+    app.log = lambda *args, **kwargs: None
+    app.call_service = lambda service, **kwargs: harness.service("diagnostic", service, **kwargs)
+
+    def get_state(entity, *, attribute):
+        assert attribute == "all"
+        # AppDaemon resolves omitted namespace arguments from the app namespace.
+        if app.namespace != "default":
+            return None
+        return dict(state="20", last_reported=clock.utc,
+                    attributes=dict(unit_of_measurement="°C"))
+
+    app.get_state = get_state
+    app.initialize()
+    try:
+        assert set(app._snapshot()) == set(app.SOURCES)
+        assert app.namespace == "default"
+    finally:
+        app.terminate()
+
+
 @pytest.mark.parametrize("diagnostics_first", [False, True], ids=["control-first", "diagnostics-first"])
 def test_scheduled_diagnostic_adapter_failures_preserve_control_and_learning(
     monkeypatch, tmp_path, diagnostics_first
